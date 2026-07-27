@@ -139,14 +139,15 @@ def main():
             log.error("Failed %s: %s", bq_table, e)
             errors.append(f"{bq_table}: {e}")
 
-    if not errors:
-        try:
-            log.info("Refreshing materialized views ...")
-            sb.rpc("refresh_eesea_matviews")
-            log.info("Matviews refreshed")
-        except Exception as e:
-            log.error("Matview refresh failed: %s", e)
-            errors.append(f"matviews: {e}")
+    # Always refresh matviews regardless of table load errors so the dashboard
+    # reflects the latest successfully-loaded data even on partial failures.
+    try:
+        log.info("Refreshing materialized views ...")
+        sb.rpc("refresh_eesea_matviews")
+        log.info("Matviews refreshed")
+    except Exception as e:
+        log.error("Matview refresh failed: %s", e)
+        errors.append(f"matviews: {e}")
 
     status = "error" if errors else "ok"
     details = "; ".join(errors) if errors else "All tables and matviews refreshed successfully"
