@@ -68,7 +68,7 @@ def pg_conn():
         host=os.environ["SUPABASE_DB_HOST"],
         port=int(os.environ.get("SUPABASE_DB_PORT", "5432")),
         dbname="postgres",
-        user="postgres",
+        user=os.environ.get("SUPABASE_DB_USER", "postgres"),
         password=os.environ["SUPABASE_DB_PASSWORD"],
         sslmode="require",
         connect_timeout=30,

@@ -27,5 +27,6 @@ jobs:
         env:
           BQ_SA_KEY_JSON: ${{ secrets.BQ_SA_KEY_JSON }}
           SUPABASE_DB_HOST: ${{ secrets.SUPABASE_DB_HOST }}
+          SUPABASE_DB_USER: ${{ secrets.SUPABASE_DB_USER }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: python scripts/load_eesea.py
