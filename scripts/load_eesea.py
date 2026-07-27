@@ -2,6 +2,7 @@
 Weekly BigQuery → Supabase loader for Eesea liner services data.
 Runs via GitHub Actions; credentials come from environment variables.
 """
+import base64
 import csv
 import io
 import json
@@ -40,7 +41,10 @@ MATVIEWS = [
 
 
 def bq_client():
-    key_json = os.environ["BQ_SA_KEY_JSON"]
+    key_json = os.environ["BQ_SA_KEY_JSON"].strip()
+    # Accept either raw JSON or base64-encoded JSON
+    if not key_json.startswith("{"):
+        key_json = base64.b64decode(key_json).decode("utf-8")
     info = json.loads(key_json)
     creds = service_account.Credentials.from_service_account_info(
         info, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
