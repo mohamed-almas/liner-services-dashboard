@@ -71,7 +71,7 @@ export default function Liners() {
             <Card title="Capacity by Trade Route (2025)">
               <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
-                  <Pie data={byRoute} dataKey="service_count" nameKey="route_type" cx="50%" cy="50%" outerRadius={90} innerRadius={50} label={({ route_type, percent }) => `${route_type} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                  <Pie data={byRoute} dataKey="service_count" nameKey="route_type" cx="50%" cy="50%" outerRadius={90} innerRadius={50} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} labelLine={false}>
                     {byRoute.map((entry, i) => (
                       <Cell key={i} fill={ROUTE_COLORS[entry.route_type] ?? '#6B7280'} />
                     ))}

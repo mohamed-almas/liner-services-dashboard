@@ -8,7 +8,7 @@ export default function GlobalOverview() {
   const [byYear, setByYear] = useState<Record<string, number>[]>([])
   const [callsByYear, setCallsByYear] = useState<{ year: number; proforma: number; actual: number; capacity: number }[]>([])
   const [topCountries, setTopCountries] = useState<{ country_code: string; active_services: number; port_count: number }[]>([])
-  const [topLiners, setTopLiners] = useState<{ company_name: string; service_count: number; route_type: string }[]>([])
+  const [topLiners, setTopLiners] = useState<{ company_name: string; service_count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 

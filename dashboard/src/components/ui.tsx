@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 export const ROUTE_COLORS: Record<string, string> = {
   'East/West': '#008B8B',

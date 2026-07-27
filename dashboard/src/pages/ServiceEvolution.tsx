@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
-import { KPICard, Card, Spinner, ErrorMsg, Select, ROUTE_COLORS, CustomTooltip, pivotByRouteType } from '../components/ui'
+import { KPICard, Card, Spinner, ErrorMsg, Select } from '../components/ui'
 
 type VersionRow = {
   service_version_id: number
@@ -20,7 +19,6 @@ export default function ServiceEvolution() {
   const [services, setServices] = useState<{ value: string; label: string }[]>([])
   const [selectedMaster, setSelectedMaster] = useState('')
   const [versions, setVersions] = useState<VersionRow[]>([])
-  const [byYearData, setByYearData] = useState<Record<string, number>[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -39,14 +37,13 @@ export default function ServiceEvolution() {
   useEffect(() => {
     if (!selectedMaster) return
     setLoading(true); setError('')
-    Promise.all([
-      supabase.from('mv_service_overview').select('*').eq('service_master_id', Number(selectedMaster)).order('service_version_valid_from', { ascending: false }),
-      supabase.from('mv_liner_by_year').select('year,route_type,service_count')
-        .eq('company_code', '__ALL__').gte('year', 2017).lte('year', 2026),
-    ]).then(([versRes]) => {
-      setVersions(versRes.data ?? [])
-    }).catch(e => setError(String(e)))
-      .finally(() => setLoading(false))
+    supabase.from('mv_service_overview').select('*').eq('service_master_id', Number(selectedMaster))
+      .order('service_version_valid_from', { ascending: false })
+      .then(({ data, error: err }) => {
+        if (err) setError(err.message)
+        else setVersions(data ?? [])
+        setLoading(false)
+      })
   }, [selectedMaster])
 
   // Build evolution table: one row per version, key columns
