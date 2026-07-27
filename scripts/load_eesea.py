@@ -43,7 +43,7 @@ def bq_client():
         key_path = f.name
     try:
         creds = service_account.Credentials.from_service_account_file(
-            key_path, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+            key_path, scopes=["https://www.googleapis.com/auth/bigquery"]
         )
     finally:
         os.unlink(key_path)
