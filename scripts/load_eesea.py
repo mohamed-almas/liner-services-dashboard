@@ -41,14 +41,25 @@ MATVIEWS = [
 
 
 def bq_client():
-    key_json = os.environ["BQ_SA_KEY_JSON"].strip()
-    # Accept either raw JSON or base64-encoded JSON
-    if not key_json.startswith("{"):
-        key_json = base64.b64decode(key_json).decode("utf-8")
-    info = json.loads(key_json)
-    creds = service_account.Credentials.from_service_account_info(
-        info, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
-    )
+    raw = os.environ["BQ_SA_KEY_JSON"].strip()
+    if not raw:
+        raise ValueError("BQ_SA_KEY_JSON secret is empty — check GitHub Secrets")
+    log.info("BQ_SA_KEY_JSON length: %d chars", len(raw))
+
+    # Accept raw JSON or base64-encoded JSON
+    key_bytes = base64.b64decode(raw) if not raw.startswith("{") else raw.encode()
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="wb") as f:
+        f.write(key_bytes)
+        key_path = f.name
+
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            key_path, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
+        )
+    finally:
+        os.unlink(key_path)
+
     return bigquery.Client(project=BQ_PROJECT, credentials=creds)
 
 
