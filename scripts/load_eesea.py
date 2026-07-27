@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 import tempfile
-from datetime import datetime, timezone
+from decimal import Decimal
 
 import requests
 from google.cloud import bigquery
@@ -82,37 +82,44 @@ class SupabaseREST:
             raise RuntimeError(f"INSERT {table} failed {r.status_code}: {r.text[:500]}")
 
 
-def bq_rows_to_dicts(result) -> tuple[list[str], list[dict]]:
-    columns = [f.name for f in result.schema]
-    rows = []
-    for row in result:
-        d = {}
-        for col, val in zip(columns, row.values()):
-            if val is None:
-                d[col] = None
-            elif hasattr(val, "isoformat"):
-                d[col] = val.isoformat()
-            else:
-                d[col] = val
-        rows.append(d)
-    return columns, rows
+def serialize_val(val):
+    if val is None:
+        return None
+    if isinstance(val, Decimal):
+        return float(val)
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return val
+
+
+def row_to_dict(columns, row):
+    return {col: serialize_val(val) for col, val in zip(columns, row.values())}
 
 
 def load_table(sb: SupabaseREST, bq: bigquery.Client, bq_table: str, pg_table: str):
     query = f"SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.{bq_table}`"
     log.info("Querying BQ: %s", bq_table)
     result = bq.query(query).result(page_size=5000)
-    _, rows = bq_rows_to_dicts(result)
-    total = len(rows)
-    log.info("  fetched %d rows, truncating %s ...", total, pg_table)
+    columns = [f.name for f in result.schema]
 
+    # Truncate first, then stream-insert in batches
     sb.rpc("truncate_eesea_table", {"table_name": pg_table})
+    log.info("  truncated %s, streaming inserts ...", pg_table)
 
-    for i in range(0, total, BATCH_SIZE):
-        batch = rows[i : i + BATCH_SIZE]
+    batch = []
+    total = 0
+    for row in result:
+        batch.append(row_to_dict(columns, row))
+        if len(batch) >= BATCH_SIZE:
+            sb.insert_batch(pg_table, batch)
+            total += len(batch)
+            batch = []
+            if (total // BATCH_SIZE) % 20 == 0:
+                log.info("  inserted %d rows into %s ...", total, pg_table)
+
+    if batch:
         sb.insert_batch(pg_table, batch)
-        if (i // BATCH_SIZE) % 10 == 0:
-            log.info("  inserted %d / %d rows", min(i + BATCH_SIZE, total), total)
+        total += len(batch)
 
     log.info("Loaded %s → %s (%d rows)", bq_table, pg_table, total)
 
