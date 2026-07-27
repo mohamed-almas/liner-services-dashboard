@@ -1,17 +1,15 @@
 """
 Weekly BigQuery → Supabase loader for Eesea liner services data.
-Runs via GitHub Actions; credentials come from environment variables.
+Uses Supabase REST API (HTTPS) — no direct DB connection required.
 """
 import base64
-import csv
-import io
-import json
 import logging
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 
-import psycopg2
+import requests
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
@@ -20,6 +18,7 @@ log = logging.getLogger(__name__)
 
 BQ_PROJECT = "eesea-deep-blue-external"
 BQ_DATASET = "ad_ports"
+BATCH_SIZE = 2000
 
 TABLES = [
     ("companies_table",           "eesea_companies"),
@@ -32,124 +31,122 @@ TABLES = [
     ("vsa_table",                 "eesea_vsa"),
 ]
 
-MATVIEWS = [
-    "mv_service_overview",
-    "mv_terminals",
-    "mv_port_activity",
-    "mv_reliability_monthly",
-]
-
 
 def bq_client():
     raw = os.environ["BQ_SA_KEY_JSON"].strip()
     if not raw:
-        raise ValueError("BQ_SA_KEY_JSON secret is empty — check GitHub Secrets")
+        raise ValueError("BQ_SA_KEY_JSON secret is empty")
     log.info("BQ_SA_KEY_JSON length: %d chars", len(raw))
-
-    # Accept raw JSON or base64-encoded JSON
     key_bytes = base64.b64decode(raw) if not raw.startswith("{") else raw.encode()
-
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="wb") as f:
         f.write(key_bytes)
         key_path = f.name
-
     try:
         creds = service_account.Credentials.from_service_account_file(
             key_path, scopes=["https://www.googleapis.com/auth/bigquery.readonly"]
         )
     finally:
         os.unlink(key_path)
-
     return bigquery.Client(project=BQ_PROJECT, credentials=creds)
 
 
-def pg_conn():
-    return psycopg2.connect(
-        host=os.environ["SUPABASE_DB_HOST"],
-        port=int(os.environ.get("SUPABASE_DB_PORT", "5432")),
-        dbname="postgres",
-        user=os.environ.get("SUPABASE_DB_USER", "postgres"),
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        sslmode="require",
-        connect_timeout=30,
-    )
+class SupabaseREST:
+    def __init__(self, url: str, service_role_key: str):
+        self.base = url.rstrip("/")
+        self.headers = {
+            "apikey": service_role_key,
+            "Authorization": f"Bearer {service_role_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+
+    def rpc(self, fn: str, params: dict = None):
+        r = requests.post(
+            f"{self.base}/rpc/{fn}",
+            json=params or {},
+            headers=self.headers,
+            timeout=60,
+        )
+        if not r.ok:
+            raise RuntimeError(f"RPC {fn} failed {r.status_code}: {r.text[:500]}")
+        return r
+
+    def insert_batch(self, table: str, rows: list[dict]):
+        r = requests.post(
+            f"{self.base}/{table}",
+            json=rows,
+            headers=self.headers,
+            timeout=120,
+        )
+        if not r.ok:
+            raise RuntimeError(f"INSERT {table} failed {r.status_code}: {r.text[:500]}")
 
 
-def bq_to_csv(client, bq_table: str) -> tuple[io.StringIO, list[str]]:
-    """Stream BQ table to an in-memory CSV, return (buffer, columns)."""
+def bq_rows_to_dicts(result) -> tuple[list[str], list[dict]]:
+    columns = [f.name for f in result.schema]
+    rows = []
+    for row in result:
+        d = {}
+        for col, val in zip(columns, row.values()):
+            if val is None:
+                d[col] = None
+            elif hasattr(val, "isoformat"):
+                d[col] = val.isoformat()
+            else:
+                d[col] = val
+        rows.append(d)
+    return columns, rows
+
+
+def load_table(sb: SupabaseREST, bq: bigquery.Client, bq_table: str, pg_table: str):
     query = f"SELECT * FROM `{BQ_PROJECT}.{BQ_DATASET}.{bq_table}`"
     log.info("Querying BQ: %s", bq_table)
-    result = client.query(query).result(page_size=5000)
+    result = bq.query(query).result(page_size=5000)
+    _, rows = bq_rows_to_dicts(result)
+    total = len(rows)
+    log.info("  fetched %d rows, truncating %s ...", total, pg_table)
 
-    columns = [f.name for f in result.schema]
-    buf = io.StringIO()
-    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
-    writer.writerow(columns)
+    sb.rpc("truncate_eesea_table", {"table_name": pg_table})
 
-    row_count = 0
-    for row in result:
-        writer.writerow([None if v is None else str(v) for v in row.values()])
-        row_count += 1
-        if row_count % 100_000 == 0:
-            log.info("  ... %d rows streamed", row_count)
+    for i in range(0, total, BATCH_SIZE):
+        batch = rows[i : i + BATCH_SIZE]
+        sb.insert_batch(pg_table, batch)
+        if (i // BATCH_SIZE) % 10 == 0:
+            log.info("  inserted %d / %d rows", min(i + BATCH_SIZE, total), total)
 
-    log.info("  total: %d rows", row_count)
-    buf.seek(0)
-    return buf, columns
-
-
-def load_table(conn, bq_table: str, pg_table: str, bq_client_obj):
-    buf, columns = bq_to_csv(bq_client_obj, bq_table)
-    cols_sql = ", ".join(f'"{c}"' for c in columns)
-    with conn.cursor() as cur:
-        cur.execute(f'truncate table "{pg_table}"')
-        copy_sql = f'COPY "{pg_table}" ({cols_sql}) FROM STDIN WITH (FORMAT csv, HEADER true, NULL \'None\')'
-        cur.copy_expert(copy_sql, buf)
-    conn.commit()
-    log.info("Loaded %s → %s", bq_table, pg_table)
-
-
-def refresh_matviews(conn):
-    with conn.cursor() as cur:
-        for mv in MATVIEWS:
-            log.info("Refreshing %s ...", mv)
-            cur.execute(f"REFRESH MATERIALIZED VIEW {mv}")
-    conn.commit()
-    log.info("All materialized views refreshed")
-
-
-def log_result(conn, status: str, details: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO eesea_refresh_log (status, details) VALUES (%s, %s)",
-            (status, details),
-        )
-    conn.commit()
+    log.info("Loaded %s → %s (%d rows)", bq_table, pg_table, total)
 
 
 def main():
-    client = bq_client()
-    conn = pg_conn()
+    sb = SupabaseREST(
+        url=os.environ["SUPABASE_URL"],
+        service_role_key=os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+    )
+    bq = bq_client()
     errors = []
 
     for bq_table, pg_table in TABLES:
         try:
-            load_table(conn, bq_table, pg_table, client)
+            load_table(sb, bq, bq_table, pg_table)
         except Exception as e:
             log.error("Failed %s: %s", bq_table, e)
             errors.append(f"{bq_table}: {e}")
 
     if not errors:
         try:
-            refresh_matviews(conn)
+            log.info("Refreshing materialized views ...")
+            sb.rpc("refresh_eesea_matviews")
+            log.info("Matviews refreshed")
         except Exception as e:
             log.error("Matview refresh failed: %s", e)
             errors.append(f"matviews: {e}")
 
     status = "error" if errors else "ok"
     details = "; ".join(errors) if errors else "All tables and matviews refreshed successfully"
-    log_result(conn, status, details)
-    conn.close()
+    try:
+        sb.rpc("log_eesea_refresh", {"p_status": status, "p_details": details})
+    except Exception:
+        pass
 
     if errors:
         log.error("Finished with errors: %s", details)
