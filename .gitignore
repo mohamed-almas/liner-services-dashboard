@@ -2,3 +2,8 @@ app/.streamlit/secrets.toml
 streamlit.log
 __pycache__/
 *.pyc
+
+# Data files — never commit source data to the repo
+*.csv
+*.xlsx
+*.parquet
