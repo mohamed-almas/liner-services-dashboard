@@ -4,9 +4,10 @@ import { supabase } from '../lib/supabase'
 import { useQuery, unwrap } from '../lib/useQuery'
 import {
   KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, BarList,
-  ROUTE_COLORS, ROUTE_ORDER, CustomTooltip, pivotByRoute, fmtTeu,
+  ROUTE_COLORS, ROUTE_ORDER, CustomTooltip, pivotByRoute, fmtTeu, fmt,
   MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
+import WorldMap from '../components/WorldMap'
 
 export default function Country() {
   const [country, setCountry] = useState('AE')
@@ -29,10 +30,10 @@ export default function Country() {
       supabase.from('mv_country_year')
         .select('year,route_type,service_count,port_count')
         .eq('country_code', country).gte('year', MIN_YEAR).lte('year', MAX_YEAR).order('year'),
-      supabase.from('mv_port_current')
-        .select('port_code,port_name,active_services,lines_calling,service_capacity_teu')
+      supabase.from('mv_port_map')
+        .select('port_code,port_name,country_name,active_services,lines_calling,service_capacity_teu,lat,lon')
         .eq('country_code', country).eq('is_chokepoint', false)
-        .order('active_services', { ascending: false }).limit(20),
+        .order('active_services', { ascending: false }).limit(200),
       supabase.from('mv_country_current')
         .select('country_code,country_short_name,active_services')
         .order('active_services', { ascending: false }).limit(12),
@@ -40,7 +41,11 @@ export default function Country() {
     return {
       kpi: kpi.data as Record<string, never> | null,
       byYear: unwrap(byYear) as { year: number; route_type: string; service_count: number }[],
-      ports: unwrap(ports) as { port_code: string; port_name: string; active_services: number; lines_calling: number; service_capacity_teu: number }[],
+      ports: unwrap(ports) as {
+        port_code: string; port_name: string; country_name: string
+        active_services: number; lines_calling: number
+        service_capacity_teu: number; lat: number; lon: number
+      }[],
       topCountries: unwrap(topCountries) as { country_code: string; country_short_name: string; active_services: number }[],
     }
   }, [country], { skip: !country })
@@ -100,6 +105,22 @@ export default function Country() {
               />
             </Card>
           </div>
+
+          <Card title="Port Locations"
+                subtitle="bubble area scales with active services">
+            {q.data.ports.length === 0 ? <Empty msg="No mapped ports." /> : (
+              <WorldMap
+                fit="data"
+                height={380}
+                showGraticule={false}
+                points={q.data.ports.map(p => ({
+                  lon: p.lon, lat: p.lat, label: p.port_name,
+                  sublabel: `${fmt(p.active_services)} services · ${fmt(p.lines_calling)} lines · ${fmtTeu(p.service_capacity_teu)} TEU`,
+                  value: p.active_services,
+                }))}
+              />
+            )}
+          </Card>
 
           <Card title="Global Ranking" subtitle="top countries by active services">
             <BarList

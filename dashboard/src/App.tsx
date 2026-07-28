@@ -10,6 +10,8 @@ import TradeRoute from './pages/TradeRoute'
 import Liners from './pages/Liners'
 import Service from './pages/Service'
 import ServiceEvolution from './pages/ServiceEvolution'
+import PortMap from './pages/PortMap'
+import RouteMap from './pages/RouteMap'
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Navigate to="/global" replace />} />
           <Route path="/global" element={<GlobalOverview />} />
+          <Route path="/port-map" element={<PortMap />} />
+          <Route path="/route-map" element={<RouteMap />} />
           <Route path="/port-trend" element={<PortTrend />} />
           <Route path="/port-snapshot" element={<PortSnapshot />} />
           <Route path="/port-connectivity" element={<PortConnectivity />} />

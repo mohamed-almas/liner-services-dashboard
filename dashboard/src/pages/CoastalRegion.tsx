@@ -4,9 +4,10 @@ import { supabase } from '../lib/supabase'
 import { useQuery, unwrap } from '../lib/useQuery'
 import {
   KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, BarList,
-  ROUTE_COLORS, ROUTE_ORDER, CustomTooltip, pivotByRoute, fmtTeu,
+  ROUTE_COLORS, ROUTE_ORDER, CustomTooltip, pivotByRoute, fmtTeu, fmt,
   MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
+import WorldMap from '../components/WorldMap'
 
 export default function CoastalRegion() {
   const [region, setRegion] = useState('')
@@ -28,10 +29,10 @@ export default function CoastalRegion() {
       supabase.from('mv_coastal_year')
         .select('year,route_type,service_count,port_count,country_count')
         .eq('coastal_region', region).gte('year', MIN_YEAR).lte('year', MAX_YEAR).order('year'),
-      supabase.from('mv_port_current')
-        .select('port_code,port_name,country_code,active_services,service_capacity_teu')
+      supabase.from('mv_port_map')
+        .select('port_code,port_name,country_name,active_services,lines_calling,service_capacity_teu,lat,lon')
         .eq('coastal_region', region).eq('is_chokepoint', false)
-        .order('active_services', { ascending: false }).limit(20),
+        .order('active_services', { ascending: false }).limit(300),
       // Distinct totals per region-year, pre-aggregated: summing the per-route
       // rows would double-count services that span multiple trade lanes.
       supabase.from('mv_coastal_year_total')
@@ -47,7 +48,11 @@ export default function CoastalRegion() {
 
     return {
       byYear: rows,
-      ports: unwrap(ports) as { port_code: string; port_name: string; active_services: number; service_capacity_teu: number }[],
+      ports: unwrap(ports) as {
+        port_code: string; port_name: string; country_name: string
+        active_services: number; lines_calling: number
+        service_capacity_teu: number; lat: number; lon: number
+      }[],
       ranking: totals.map(t => ({ label: t.coastal_region, value: t.service_count })),
       services: mine?.service_count ?? 0,
       countries: mine?.country_count ?? 0,
@@ -98,6 +103,21 @@ export default function CoastalRegion() {
               />
             </Card>
           </div>
+
+          <Card title="Port Locations" subtitle="bubble area scales with active services">
+            {q.data.ports.length === 0 ? <Empty msg="No mapped ports." /> : (
+              <WorldMap
+                fit="data"
+                height={400}
+                showGraticule={false}
+                points={q.data.ports.map(p => ({
+                  lon: p.lon, lat: p.lat, label: p.port_name,
+                  sublabel: `${p.country_name} · ${fmt(p.active_services)} services · ${fmtTeu(p.service_capacity_teu)} TEU`,
+                  value: p.active_services,
+                }))}
+              />
+            )}
+          </Card>
 
           <Card title="All Coastal Regions" subtitle={`ranked by services calling in ${MAX_YEAR - 1}`}>
             <BarList rows={q.data.ranking} color="#4682B4" maxRows={16} />

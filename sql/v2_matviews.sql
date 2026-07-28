@@ -674,6 +674,13 @@ BEGIN
   REFRESH MATERIALIZED VIEW mv_port_connectivity_qtr;
   REFRESH MATERIALIZED VIEW mv_port_partner_country;
 
+  -- Geography / maps (see v3_geography.sql).
+  -- mv_port_map reads mv_port_connectivity_current, so it must follow it.
+  REFRESH MATERIALIZED VIEW mv_route_geom;
+  REFRESH MATERIALIZED VIEW mv_route_service;
+  REFRESH MATERIALIZED VIEW mv_port_map;
+  REFRESH MATERIALIZED VIEW mv_port_cluster;
+
   -- Global roll-up last: it reads the views above
   REFRESH MATERIALIZED VIEW mv_global_current;
 END;

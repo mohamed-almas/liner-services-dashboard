@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 const NAV = [
   { to: '/global',            icon: '🌍', label: 'Global Overview' },
+  { to: '/port-map',          icon: '🗺️', label: 'Global Port Map' },
+  { to: '/route-map',         icon: '🧭', label: 'Route Map' },
   { to: '/port-trend',        icon: '📊', label: 'Port Trend' },
   { to: '/port-snapshot',     icon: '📍', label: 'Port Snapshot' },
   { to: '/port-connectivity', icon: '🔄', label: 'Port Connectivity' },
