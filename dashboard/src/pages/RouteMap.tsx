@@ -7,7 +7,8 @@ import {
 import WorldMap from '../components/WorldMap'
 import {
   routesForService, routesForPort, routesForLiner, routesForPortAt,
-  toMapRoutes, endpointsFromRoutes, type RouteRow,
+  routeStatsForService, routeStatsForPort, routeStatsForLiner, routeStatsForPortAt,
+  toMapRoutes, endpointsFromRoutes, type RouteRow, type RouteStats,
 } from '../lib/routes'
 
 type Mode = 'Service' | 'Port' | 'Liner' | 'Compare periods'
@@ -86,26 +87,41 @@ export default function RouteMap() {
   const prevDate = useMemo(
     () => iso(shiftMonths(anchor, LOOKBACK_MONTHS[lookback])), [anchor, lookback])
 
+  const empty = { now: [] as RouteRow[], then: [] as RouteRow[],
+                  stats: null as RouteStats | null, statsThen: null as RouteStats | null }
+
   const q = useQuery(async () => {
+    // Geometry and statistics are fetched separately: the geometry RPCs cap
+    // their payload for legibility, so KPI counts come from the stats RPCs.
     if (mode === 'Service') {
-      if (!service) return { now: [] as RouteRow[], then: [] as RouteRow[] }
-      return { now: await routesForService(Number(service)), then: [] as RouteRow[] }
+      if (!service) return empty
+      const [now, stats] = await Promise.all([
+        routesForService(Number(service)), routeStatsForService(Number(service)),
+      ])
+      return { ...empty, now, stats }
     }
     if (mode === 'Port') {
-      if (!port) return { now: [] as RouteRow[], then: [] as RouteRow[] }
-      return { now: await routesForPort(port), then: [] as RouteRow[] }
+      if (!port) return empty
+      const [now, stats] = await Promise.all([
+        routesForPort(port), routeStatsForPort(port),
+      ])
+      return { ...empty, now, stats }
     }
     if (mode === 'Liner') {
-      if (!liner) return { now: [] as RouteRow[], then: [] as RouteRow[] }
-      return { now: await routesForLiner(liner), then: [] as RouteRow[] }
+      if (!liner) return empty
+      const [now, stats] = await Promise.all([
+        routesForLiner(liner), routeStatsForLiner(liner),
+      ])
+      return { ...empty, now, stats }
     }
-    // Compare periods
-    if (!port) return { now: [] as RouteRow[], then: [] as RouteRow[] }
-    const [now, then] = await Promise.all([
+    if (!port) return empty
+    const [now, then, stats, statsThen] = await Promise.all([
       routesForPortAt(port, iso(anchor)),
       routesForPortAt(port, prevDate),
+      routeStatsForPortAt(port, iso(anchor)),
+      routeStatsForPortAt(port, prevDate),
     ])
-    return { now, then }
+    return { now, then, stats, statsThen }
   }, [mode, service, port, liner, prevDate])
 
   const lookupMap = portDim.data ?? new Map()
@@ -140,7 +156,9 @@ export default function RouteMap() {
     return endpointsFromRoutes(rows, lookupMap)
   }, [compare, nowRows, thenRows, lookupMap])
 
-  const totalNm = nowRows.reduce((s, r) => s + (r.route_distance_nm ?? 0), 0)
+  const stats = q.data?.stats ?? null
+  const statsThen = q.data?.statsThen ?? null
+  const truncated = stats ? stats.legs > nowRows.length : false
   const focusPort = (mode === 'Port' || mode === 'Compare periods')
     ? lookupMap.get(port)?.name : undefined
 
@@ -186,20 +204,30 @@ export default function RouteMap() {
        : (
         <>
           {compare ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KPICard label="Legs now" value={nowRows.length} accent sub={iso(anchor)} />
-              <KPICard label={`Legs ${lookback} ago`} value={thenRows.length} sub={prevDate} />
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              <KPICard label="Active Services" value={stats?.active_services ?? 0} accent sub={iso(anchor)} />
+              <KPICard label={`Services ${lookback} ago`} value={statsThen?.active_services ?? 0} sub={prevDate} />
+              <KPICard label="Legs now" value={stats?.legs ?? 0} sub={iso(anchor)} />
+              <KPICard label={`Legs ${lookback} ago`} value={statsThen?.legs ?? 0} sub={prevDate} />
               <KPICard label="Gained" value={compare.gained.length} sub="new legs" />
               <KPICard label="Lost" value={compare.lost.length} sub="no longer served" />
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KPICard label="Legs" value={nowRows.length} accent
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+              <KPICard label="Active Services" value={stats?.active_services ?? 0} accent
+                       sub={mode === 'Service' ? 'this version' : 'currently active'} />
+              <KPICard label="Legs" value={stats?.legs ?? 0}
                        sub={mode === 'Service' ? 'in rotation' : 'distinct port pairs'} />
-              <KPICard label="Ports Touched" value={mapPoints.length} />
-              <KPICard label="Total Distance" value={fmt(totalNm)} sub="nautical miles" />
-              <KPICard label="Antimeridian Legs" value={nowRows.filter(r => r.crosses_antimeridian).length}
-                       sub="trans-Pacific" />
+              <KPICard label="Ports Touched" value={stats?.ports ?? 0} />
+              <KPICard label="Total Distance" value={fmt(stats?.total_nm)} sub="nautical miles" />
+              <KPICard label="Antimeridian Legs" value={stats?.antimeridian_legs ?? 0} sub="trans-Pacific" />
+            </div>
+          )}
+
+          {truncated && (
+            <div className="text-[11px] text-[#7D93B4] bg-[#0B1830] border border-[#1E3A5F] rounded px-3 py-2">
+              Showing {fmt(nowRows.length)} of {fmt(stats?.legs)} legs on the map to keep it legible.
+              The figures above cover the full network.
             </div>
           )}
 

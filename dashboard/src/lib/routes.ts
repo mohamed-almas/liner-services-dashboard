@@ -47,6 +47,50 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<RouteRow[
   return normalise((data ?? []) as unknown[])
 }
 
+/**
+ * True totals for a route set.
+ *
+ * Must be fetched separately from the geometry: the geometry RPCs cap their
+ * payload to keep the map legible (routes_for_liner defaults to 900), and MSC
+ * hits that cap exactly — so counting the returned rows understates. These come
+ * from server-side aggregates over the whole set.
+ */
+export type RouteStats = {
+  legs: number
+  active_services: number
+  ports: number
+  total_nm: number
+  antimeridian_legs: number
+}
+
+const EMPTY_STATS: RouteStats = {
+  legs: 0, active_services: 0, ports: 0, total_nm: 0, antimeridian_legs: 0,
+}
+
+async function statsRpc(fn: string, args: Record<string, unknown>): Promise<RouteStats> {
+  const { data, error } = await supabase.rpc(fn, args)
+  if (error) throw new Error(error.message)
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) return EMPTY_STATS
+  const r = row as Record<string, unknown>
+  return {
+    legs: Number(r.legs ?? 0),
+    active_services: Number(r.active_services ?? 0),
+    ports: Number(r.ports ?? 0),
+    total_nm: Number(r.total_nm ?? 0),
+    antimeridian_legs: Number(r.antimeridian_legs ?? 0),
+  }
+}
+
+export const routeStatsForService = (versionId: number) =>
+  statsRpc('route_stats_for_service', { p_version_id: versionId })
+export const routeStatsForPort = (portCode: string) =>
+  statsRpc('route_stats_for_port', { p_port_code: portCode })
+export const routeStatsForLiner = (companyCode: string) =>
+  statsRpc('route_stats_for_liner', { p_company_code: companyCode })
+export const routeStatsForPortAt = (portCode: string, asOf: string) =>
+  statsRpc('route_stats_for_port_at', { p_port_code: portCode, p_as_of: asOf })
+
 export const routesForService = (versionId: number) =>
   rpc('routes_for_service', { p_version_id: versionId })
 
