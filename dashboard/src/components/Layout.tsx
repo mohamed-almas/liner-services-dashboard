@@ -1,42 +1,60 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { useTheme } from '../lib/theme'
 
 const NAV = [
-  { to: '/global',            icon: '🌍', label: 'Global Overview' },
-  { to: '/port-map',          icon: '🗺️', label: 'Global Port Map' },
-  { to: '/route-map',         icon: '🧭', label: 'Route Map' },
-  { to: '/port-trend',        icon: '📊', label: 'Port Trend' },
-  { to: '/port-snapshot',     icon: '📍', label: 'Port Snapshot' },
-  { to: '/port-connectivity', icon: '🔄', label: 'Port Connectivity' },
-  { to: '/country',           icon: '🏳️', label: 'Country' },
-  { to: '/coastal-region',    icon: '🌊', label: 'Coastal Region' },
-  { to: '/trade-route',       icon: '🛣️', label: 'Trade Route' },
-  { to: '/liners',            icon: '🚢', label: 'Liners' },
-  { to: '/service',           icon: '⚓', label: 'Service' },
-  { to: '/service-evolution', icon: '📈', label: 'Service Evolution' },
+  { to: '/global',         icon: '🌍', label: 'Global Overview' },
+  { to: '/port',           icon: '⚓', label: 'Ports' },
+  { to: '/country',        icon: '🏳️', label: 'Country' },
+  { to: '/coastal-region', icon: '🌊', label: 'Coastal Region' },
+  { to: '/trade-route',    icon: '🛣️', label: 'Trade Route' },
+  { to: '/liners',         icon: '🚢', label: 'Liners' },
+  { to: '/service',        icon: '🧭', label: 'Services' },
 ]
+
+function ThemeToggle({ compact = false }: { compact?: boolean }) {
+  const { mode, toggle } = useTheme()
+  const next = mode === 'dark' ? 'light' : 'dark'
+  return (
+    <button
+      onClick={toggle}
+      title={`Switch to ${next} mode`}
+      aria-label={`Switch to ${next} mode`}
+      className={`flex items-center gap-2 rounded border transition-colors
+                  ${compact ? 'px-2 py-1' : 'px-3 py-1.5 w-full justify-center'}`}
+      style={{ borderColor: 'var(--border)', color: 'var(--muted)', background: 'transparent' }}
+    >
+      <span className="text-sm leading-none">{mode === 'dark' ? '☀️' : '🌙'}</span>
+      {!compact && <span className="text-[11px]">{mode === 'dark' ? 'Light' : 'Dark'} mode</span>}
+    </button>
+  )
+}
 
 export default function Layout() {
   const [open, setOpen] = useState(false)
 
   return (
     <div className="flex w-full min-h-screen">
-      {/* Mobile backdrop */}
       {open && (
-        <div className="fixed inset-0 bg-black/60 z-20 lg:hidden" onClick={() => setOpen(false)} />
+        <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setOpen(false)} />
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-30 w-56 shrink-0 bg-[#070E1E]
-                    border-r border-[#1E3A5F] flex flex-col transition-transform
+        className={`fixed lg:static inset-y-0 left-0 z-30 w-56 shrink-0 border-r
+                    flex flex-col transition-transform
                     ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        style={{ background: 'var(--sidebar)', borderColor: 'var(--border)' }}
       >
-        <div className="px-4 py-4 border-b border-[#1E3A5F]">
+        <div className="px-4 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-2">
-            <span className="text-[#00C2CB] text-lg leading-none">✦</span>
+            <span className="text-lg leading-none" style={{ color: 'var(--accent)' }}>✦</span>
             <div>
-              <div className="text-white text-xs font-bold leading-tight">AD Ports Group</div>
-              <div className="text-[#94A3B8] text-[10px] leading-tight">Liner Services Intelligence</div>
+              <div className="text-xs font-bold leading-tight" style={{ color: 'var(--text)' }}>
+                AD Ports Group
+              </div>
+              <div className="text-[10px] leading-tight" style={{ color: 'var(--muted)' }}>
+                Liner Services Intelligence
+              </div>
             </div>
           </div>
         </div>
@@ -47,12 +65,16 @@ export default function Layout() {
               key={item.to}
               to={item.to}
               onClick={() => setOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-2 text-[13px] transition-colors ${
-                  isActive
-                    ? 'bg-[#0F2040] text-[#00C2CB] border-r-2 border-[#00C2CB] font-medium'
-                    : 'text-[#94A3B8] hover:text-white hover:bg-[#0D1B33]'
-                }`
+              className="flex items-center gap-3 px-4 py-2 text-[13px] transition-colors"
+              style={({ isActive }) =>
+                isActive
+                  ? {
+                      background: 'var(--panel)',
+                      color: 'var(--accent)',
+                      borderRight: '2px solid var(--accent)',
+                      fontWeight: 500,
+                    }
+                  : { color: 'var(--muted)' }
               }
             >
               <span className="text-sm w-4 text-center shrink-0">{item.icon}</span>
@@ -61,24 +83,25 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="px-4 py-3 border-t border-[#1E3A5F] text-[10px] text-[#4A6082] leading-relaxed">
-          eeSea via BigQuery
-          <br />
-          Refreshed weekly
+        <div className="px-3 py-3 border-t space-y-2" style={{ borderColor: 'var(--border)' }}>
+          <ThemeToggle />
+          <div className="text-[10px] leading-relaxed px-1" style={{ color: 'var(--faint)' }}>
+            eeSea via BigQuery · refreshed weekly
+          </div>
         </div>
       </aside>
 
-      <div className="flex-1 min-w-0 flex flex-col bg-[#0A1628]">
-        {/* Mobile header */}
-        <div className="lg:hidden flex items-center gap-3 px-4 py-3 border-b border-[#1E3A5F] shrink-0">
-          <button
-            onClick={() => setOpen(v => !v)}
-            aria-label="Toggle navigation"
-            className="text-[#94A3B8] hover:text-white text-lg leading-none"
-          >
+      <div className="flex-1 min-w-0 flex flex-col" style={{ background: 'var(--bg)' }}>
+        <div className="lg:hidden flex items-center gap-3 px-4 py-3 border-b shrink-0"
+             style={{ borderColor: 'var(--border)' }}>
+          <button onClick={() => setOpen(v => !v)} aria-label="Toggle navigation"
+                  className="text-lg leading-none" style={{ color: 'var(--muted)' }}>
             ☰
           </button>
-          <span className="text-white text-sm font-semibold">Liner Services</span>
+          <span className="text-sm font-semibold flex-1" style={{ color: 'var(--text)' }}>
+            Liner Services
+          </span>
+          <ThemeToggle compact />
         </div>
 
         <main className="flex-1 min-w-0 overflow-x-hidden p-4 sm:p-5 lg:p-6">

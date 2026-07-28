@@ -1,38 +1,43 @@
 import type { ReactNode } from 'react'
+import { useTheme } from '../lib/theme'
 
-/** Route-type palette, matching the Power BI report. */
+/** Route-type palette, matching the Power BI report. Mid-tone hues chosen so
+ *  they stay legible against both the light and dark surfaces. */
 export const ROUTE_COLORS: Record<string, string> = {
-  'East/West': '#008B8B',
-  'North/South': '#87CEEB',
-  'Intra-Regional': '#4682B4',
-  'Feeders': '#4169E1',
-  'Other': '#6B7280',
+  'East/West': '#00808B',
+  'North/South': '#5BA4CF',
+  'Intra-Regional': '#3E7CA6',
+  'Feeders': '#4156C8',
+  'Other': '#7A8699',
 }
 export const ROUTE_ORDER = ['East/West', 'North/South', 'Intra-Regional', 'Feeders', 'Other']
 
-/** Latest month with reliable data. Forward months are thin: only 108 of 1,777
- *  current service versions carry an end date, so later snapshots understate. */
 export const MAX_YEAR = new Date().getFullYear()
 export const MIN_YEAR = 2018
 
 export function Spinner() {
   return (
     <div className="flex items-center justify-center h-48">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00C2CB]" />
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2"
+           style={{ borderColor: 'var(--accent)' }} />
     </div>
   )
 }
 
 export function ErrorMsg({ msg }: { msg: string }) {
   return (
-    <div className="flex items-center justify-center h-48 px-4 text-red-400 text-sm text-center">
+    <div className="flex items-center justify-center h-48 px-4 text-red-500 text-sm text-center">
       {msg}
     </div>
   )
 }
 
 export function Empty({ msg = 'No data for this selection.' }: { msg?: string }) {
-  return <div className="flex items-center justify-center h-40 text-[#64748B] text-sm">{msg}</div>
+  return (
+    <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--dim)' }}>
+      {msg}
+    </div>
+  )
 }
 
 export function fmt(n: number | null | undefined, digits = 0): string {
@@ -59,37 +64,47 @@ export function KPICard({
   delta?: number | null
 }) {
   return (
-    <div className="bg-[#0F2040] border border-[#1E3A5F] rounded-lg px-4 py-3 flex flex-col justify-center min-h-[92px]">
+    <div className="rounded-lg px-4 py-3 flex flex-col justify-center min-h-[92px] border"
+         style={{ background: 'var(--panel)', borderColor: 'var(--border)' }}>
       <div className="flex items-baseline gap-2">
-        <span className={`text-2xl font-bold leading-none ${accent ? 'text-[#00C2CB]' : 'text-white'}`}>
+        <span className="text-2xl font-bold leading-none"
+              style={{ color: accent ? 'var(--accent)' : 'var(--text)' }}>
           {typeof value === 'number' ? fmt(value) : (value ?? '—')}
         </span>
         {delta !== undefined && delta !== null && delta !== 0 && (
-          <span className={`text-xs font-semibold ${delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          <span className={`text-xs font-semibold ${delta > 0 ? 'text-emerald-500' : 'text-red-500'}`}>
             {delta > 0 ? '▲' : '▼'} {fmt(Math.abs(delta))}
           </span>
         )}
       </div>
-      <span className="text-[11px] text-[#94A3B8] mt-1.5 leading-tight">{label}</span>
-      {sub && <span className="text-[10px] text-[#5A7196] mt-0.5 leading-tight">{sub}</span>}
+      <span className="text-[11px] mt-1.5 leading-tight" style={{ color: 'var(--muted)' }}>{label}</span>
+      {sub && <span className="text-[10px] mt-0.5 leading-tight" style={{ color: 'var(--dim)' }}>{sub}</span>}
     </div>
   )
 }
 
 export function Card({
-  title, subtitle, children, className = '',
+  title, subtitle, children, className = '', actions,
 }: {
   title?: string
   subtitle?: string
   children: ReactNode
   className?: string
+  actions?: ReactNode
 }) {
   return (
-    <div className={`bg-[#0F2040] border border-[#1E3A5F] rounded-lg p-4 ${className}`}>
-      {title && (
-        <div className="mb-3">
-          <h3 className="text-xs font-semibold text-[#CBD5E1] uppercase tracking-wide">{title}</h3>
-          {subtitle && <p className="text-[10px] text-[#5A7196] mt-0.5">{subtitle}</p>}
+    <div className={`rounded-lg p-4 border ${className}`}
+         style={{ background: 'var(--panel)', borderColor: 'var(--border)' }}>
+      {(title || actions) && (
+        <div className="mb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            {title && (
+              <h3 className="text-xs font-semibold uppercase tracking-wide"
+                  style={{ color: 'var(--text-2)' }}>{title}</h3>
+            )}
+            {subtitle && <p className="text-[10px] mt-0.5" style={{ color: 'var(--dim)' }}>{subtitle}</p>}
+          </div>
+          {actions}
         </div>
       )}
       {children}
@@ -107,10 +122,22 @@ export function PageHeader({
   return (
     <div className="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 className="text-xl font-bold text-white leading-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-[#5A7196] mt-1">{subtitle}</p>}
+        <h1 className="text-xl font-bold leading-tight" style={{ color: 'var(--text)' }}>{title}</h1>
+        {subtitle && <p className="text-xs mt-1" style={{ color: 'var(--dim)' }}>{subtitle}</p>}
       </div>
       {children && <div className="flex items-center gap-3 flex-wrap">{children}</div>}
+    </div>
+  )
+}
+
+/** Section divider, for pages that fold several former pages together. */
+export function SectionTitle({ title, note }: { title: string; note?: string }) {
+  return (
+    <div className="flex items-baseline gap-3 pt-1">
+      <h2 className="text-[13px] font-semibold uppercase tracking-wider"
+          style={{ color: 'var(--accent)' }}>{title}</h2>
+      <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+      {note && <span className="text-[10px]" style={{ color: 'var(--dim)' }}>{note}</span>}
     </div>
   )
 }
@@ -128,8 +155,9 @@ export function Select({
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className={`bg-[#0F2040] border border-[#1E3A5F] text-white text-sm rounded px-3 py-1.5
-                  focus:outline-none focus:border-[#00C2CB] min-w-[200px] max-w-[340px] ${className}`}
+      className={`text-sm rounded px-3 py-1.5 border focus:outline-none
+                  min-w-[200px] max-w-[340px] ${className}`}
+      style={{ background: 'var(--panel)', borderColor: 'var(--border)', color: 'var(--text)' }}
     >
       {placeholder && <option value="">{placeholder}</option>}
       {options.map(o => (
@@ -140,27 +168,34 @@ export function Select({
 }
 
 export function Tabs({
-  value, onChange, options,
+  value, onChange, options, size = 'md',
 }: {
   value: string
   onChange: (v: string) => void
   options: string[]
+  size?: 'sm' | 'md'
 }) {
   return (
     <div className="flex gap-1.5 flex-wrap">
-      {options.map(o => (
-        <button
-          key={o}
-          onClick={() => onChange(o)}
-          className={`px-3 py-1 text-xs rounded border transition-colors ${
-            value === o
-              ? 'bg-[#00C2CB] border-[#00C2CB] text-[#062032] font-semibold'
-              : 'border-[#1E3A5F] text-[#94A3B8] hover:text-white hover:border-[#2F5480]'
-          }`}
-        >
-          {o}
-        </button>
-      ))}
+      {options.map(o => {
+        const active = value === o
+        return (
+          <button
+            key={o}
+            onClick={() => onChange(o)}
+            className={`rounded border transition-colors ${
+              size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'
+            } ${active ? 'font-semibold' : ''}`}
+            style={
+              active
+                ? { background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--accent-ink)' }
+                : { background: 'transparent', borderColor: 'var(--border)', color: 'var(--muted)' }
+            }
+          >
+            {o}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -174,14 +209,18 @@ export function CustomTooltip({
   payload?: TooltipPayload[]
   label?: string | number
 }) {
+  const { palette } = useTheme()
   if (!active || !payload?.length) return null
   const rows = payload.filter(p => p.value !== undefined && p.value !== null && p.value !== 0)
   if (!rows.length) return null
   return (
-    <div className="bg-[#0B1830] border border-[#2F5480] rounded px-3 py-2 text-xs shadow-xl">
-      {label !== undefined && <p className="font-bold mb-1 text-white">{label}</p>}
+    <div className="rounded px-3 py-2 text-xs shadow-xl border"
+         style={{ background: palette.tooltipBg, borderColor: palette.tooltipBorder }}>
+      {label !== undefined && (
+        <p className="font-bold mb-1" style={{ color: palette.text }}>{label}</p>
+      )}
       {rows.map((p, i) => (
-        <p key={i} style={{ color: p.color ?? p.fill ?? '#00C2CB' }} className="leading-relaxed">
+        <p key={i} style={{ color: p.color ?? p.fill ?? palette.accent }} className="leading-relaxed">
           {p.name}: <span className="font-semibold">{fmt(p.value)}</span>
         </p>
       ))}
@@ -214,15 +253,16 @@ export function pivotByRoute<T extends Record<string, unknown>>(
 }
 
 /** Horizontal bar list — clearer than a Recharts vertical BarChart for rankings,
- *  and avoids label truncation on long port/liner names. */
+ *  and avoids label truncation on long port and carrier names. */
 export function BarList({
-  rows, valueFormat = fmt, color = '#008B8B', maxRows = 12,
+  rows, valueFormat = fmt, color, maxRows = 12,
 }: {
   rows: { label: string; value: number; sub?: string }[]
   valueFormat?: (n: number) => string
   color?: string
   maxRows?: number
 }) {
+  const { palette } = useTheme()
   const shown = rows.slice(0, maxRows)
   const max = Math.max(...shown.map(r => r.value), 1)
   if (!shown.length) return <Empty />
@@ -230,15 +270,20 @@ export function BarList({
     <div className="space-y-1.5">
       {shown.map((r, i) => (
         <div key={i} className="flex items-center gap-2 text-xs">
-          <span className="w-4 text-right text-[#5A7196] tabular-nums shrink-0">{i + 1}</span>
-          <span className="w-32 truncate text-[#CBD5E1] shrink-0" title={r.label}>{r.label}</span>
-          <div className="flex-1 h-4 bg-[#0A1628] rounded-sm overflow-hidden min-w-[40px]">
-            <div
-              className="h-full rounded-sm transition-all"
-              style={{ width: `${(r.value / max) * 100}%`, backgroundColor: color }}
-            />
+          <span className="w-4 text-right tabular-nums shrink-0" style={{ color: 'var(--faint)' }}>
+            {i + 1}
+          </span>
+          <span className="w-32 truncate shrink-0" style={{ color: 'var(--text-2)' }} title={r.label}>
+            {r.label}
+          </span>
+          <div className="flex-1 h-4 rounded-sm overflow-hidden min-w-[40px]"
+               style={{ background: 'var(--panel-alt)' }}>
+            <div className="h-full rounded-sm transition-all"
+                 style={{ width: `${(r.value / max) * 100}%`,
+                          backgroundColor: color ?? palette.accent }} />
           </div>
-          <span className="w-16 text-right font-semibold text-white tabular-nums shrink-0">
+          <span className="w-16 text-right font-semibold tabular-nums shrink-0"
+                style={{ color: 'var(--text)' }}>
             {valueFormat(r.value)}
           </span>
         </div>

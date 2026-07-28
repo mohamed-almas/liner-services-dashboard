@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { useQuery, unwrap } from '../lib/useQuery'
+import { useTheme } from '../lib/theme'
 import {
   KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, BarList,
   ROUTE_COLORS, ROUTE_ORDER, CustomTooltip, pivotByRoute, fmtTeu, fmt,
@@ -10,6 +11,7 @@ import {
 import WorldMap from '../components/WorldMap'
 
 export default function CoastalRegion() {
+  const { palette } = useTheme()
   const [region, setRegion] = useState('')
 
   const regions = useQuery(async () => {
@@ -84,9 +86,9 @@ export default function CoastalRegion() {
               {q.data.byYear.length === 0 ? <Empty /> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={pivotByRoute(q.data.byYear)} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                    <XAxis dataKey="year" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: '#1E3A5F' }} tickLine={false} />
-                    <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} width={38} axisLine={false} tickLine={false} />
-                    <Tooltip content={<CustomTooltip />} cursor={{ fill: '#ffffff08' }} />
+                    <XAxis dataKey="year" tick={{ fill: palette.axis, fontSize: 11 }} axisLine={{ stroke: palette.grid }} tickLine={false} />
+                    <YAxis tick={{ fill: palette.axis, fontSize: 11 }} width={38} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: palette.grid, fillOpacity: 0.25 }} />
                     <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={7} />
                     {ROUTE_ORDER.map(rt => (
                       <Bar key={rt} dataKey={rt} stackId="a" fill={ROUTE_COLORS[rt]} />
@@ -99,7 +101,7 @@ export default function CoastalRegion() {
             <Card title="Ports in Region" subtitle="by active services">
               <BarList
                 rows={q.data.ports.map(p => ({ label: p.port_name ?? p.port_code, value: p.active_services }))}
-                color="#4169E1" maxRows={14}
+                color={ROUTE_COLORS['Feeders']} maxRows={14}
               />
             </Card>
           </div>
@@ -120,7 +122,7 @@ export default function CoastalRegion() {
           </Card>
 
           <Card title="All Coastal Regions" subtitle={`ranked by services calling in ${MAX_YEAR - 1}`}>
-            <BarList rows={q.data.ranking} color="#4682B4" maxRows={16} />
+            <BarList rows={q.data.ranking} color={ROUTE_COLORS['Intra-Regional']} maxRows={16} />
           </Card>
         </>
       )}

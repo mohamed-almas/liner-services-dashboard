@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { geoNaturalEarth1, geoMercator, geoPath, geoGraticule10 } from 'd3-geo'
 import type { GeoProjection, GeoPermissibleObjects } from 'd3-geo'
+import { useTheme } from '../lib/theme'
 
 /**
  * Self-contained SVG world map.
@@ -95,6 +96,7 @@ export default function WorldMap({
   emphasisPort?: string
   legend?: { color: string; label: string }[]
 }) {
+  const { palette } = useTheme()
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(880)
   const [land, setLand] = useState<GeoPermissibleObjects | null>(null)
@@ -163,11 +165,11 @@ export default function WorldMap({
       <svg width={width} height={height} className="block select-none"
            role="img" aria-label="Map">
         {/* ocean */}
-        <path d={spherePath} fill="#08172E" stroke="#1E3A5F" strokeWidth={0.6} />
+        <path d={spherePath} fill={palette.ocean} stroke={palette.grid} strokeWidth={0.6} />
         {showGraticule && (
-          <path d={gratPath} fill="none" stroke="#123055" strokeWidth={0.4} opacity={0.7} />
+          <path d={gratPath} fill="none" stroke={palette.graticule} strokeWidth={0.4} opacity={0.7} />
         )}
-        <path d={landPath} fill="#16283F" stroke="#28486E" strokeWidth={0.4} />
+        <path d={landPath} fill={palette.land} stroke={palette.landStroke} strokeWidth={0.4} />
 
         {/* routes under points */}
         <g>
@@ -183,7 +185,7 @@ export default function WorldMap({
                 key={i}
                 d={d}
                 fill="none"
-                stroke={r.color ?? '#00C2CB'}
+                stroke={r.color ?? palette.accent}
                 strokeWidth={w}
                 strokeOpacity={0.75}
                 strokeLinecap="round"
@@ -204,13 +206,13 @@ export default function WorldMap({
               <g key={i}>
                 {isEmph && (
                   <circle cx={xy[0]} cy={xy[1]} r={r + 5} fill="none"
-                          stroke="#FFD700" strokeWidth={1.6} opacity={0.9} />
+                          stroke="#E8A400" strokeWidth={1.6} opacity={0.9} />
                 )}
                 <circle
                   cx={xy[0]} cy={xy[1]} r={r}
-                  fill={p.color ?? (isEmph ? '#FFD700' : '#00C2CB')}
+                  fill={p.color ?? (isEmph ? '#E8A400' : palette.accent)}
                   fillOpacity={0.78}
-                  stroke="#04101F" strokeWidth={0.7}
+                  stroke={palette.pointStroke} strokeWidth={0.7}
                   onMouseEnter={() => setHover({ x: xy[0], y: xy[1], p })}
                   onMouseLeave={() => setHover(null)}
                   style={{ cursor: 'pointer' }}
@@ -222,10 +224,11 @@ export default function WorldMap({
       </svg>
 
       {legend && legend.length > 0 && (
-        <div className="absolute left-2 bottom-2 flex flex-wrap gap-x-3 gap-y-1
-                        bg-[#08172ECC] border border-[#1E3A5F] rounded px-2 py-1">
+        <div className="absolute left-2 bottom-2 flex flex-wrap gap-x-3 gap-y-1 rounded px-2 py-1 border"
+             style={{ background: palette.tooltipBg, borderColor: palette.tooltipBorder, opacity: 0.94 }}>
           {legend.map((l, i) => (
-            <span key={i} className="flex items-center gap-1.5 text-[10px] text-[#94A3B8]">
+            <span key={i} className="flex items-center gap-1.5 text-[10px]"
+                  style={{ color: palette.muted }}>
               <span className="inline-block w-2 h-2 rounded-full" style={{ background: l.color }} />
               {l.label}
             </span>
@@ -235,20 +238,23 @@ export default function WorldMap({
 
       {hover && (
         <div
-          className="pointer-events-none absolute z-10 bg-[#0B1830] border border-[#2F5480]
-                     rounded px-2 py-1 text-[11px] text-white shadow-xl whitespace-nowrap"
+          className="pointer-events-none absolute z-10 rounded px-2 py-1 text-[11px]
+                     shadow-xl whitespace-nowrap border"
           style={{
+            background: palette.tooltipBg,
+            borderColor: palette.tooltipBorder,
+            color: palette.text,
             left: Math.min(Math.max(hover.x + 10, 4), Math.max(width - 190, 4)),
             top: Math.max(hover.y - 34, 2),
           }}
         >
           <div className="font-semibold">{hover.p.label}</div>
-          {hover.p.sublabel && <div className="text-[#94A3B8]">{hover.p.sublabel}</div>}
+          {hover.p.sublabel && <div style={{ color: palette.muted }}>{hover.p.sublabel}</div>}
         </div>
       )}
 
       {!land && (
-        <div className="absolute right-2 top-2 text-[10px] text-[#4A6082]">
+        <div className="absolute right-2 top-2 text-[10px]" style={{ color: palette.muted }}>
           loading basemap…
         </div>
       )}

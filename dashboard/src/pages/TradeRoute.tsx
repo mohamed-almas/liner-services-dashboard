@@ -2,14 +2,16 @@ import { useState, useEffect } from 'react'
 import { XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ComposedChart, Bar, Line } from 'recharts'
 import { supabase } from '../lib/supabase'
 import { useQuery, unwrap } from '../lib/useQuery'
+import { useTheme } from '../lib/theme'
 import {
   KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, Tabs, BarList,
-  CustomTooltip, fmtTeu, fmt, MIN_YEAR, MAX_YEAR,
+  ROUTE_COLORS, CustomTooltip, fmtTeu, fmt, MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
 
 const ROUTE_1 = ['East/West', 'North/South', 'Intra-Regional', 'Feeders']
 
 export default function TradeRoute() {
+  const { palette } = useTheme()
   const [route1, setRoute1] = useState('East/West')
   const [route2, setRoute2] = useState('')   // '' = all
   const [route3, setRoute3] = useState('')   // '' = all
@@ -119,14 +121,14 @@ export default function TradeRoute() {
             {q.data.byYear.length === 0 ? <Empty /> : (
               <ResponsiveContainer width="100%" height={280}>
                 <ComposedChart data={q.data.byYear} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                  <XAxis dataKey="year" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: '#1E3A5F' }} tickLine={false} />
-                  <YAxis yAxisId="l" tick={{ fill: '#94A3B8', fontSize: 11 }} width={42} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="r" orientation="right" tick={{ fill: '#94A3B8', fontSize: 11 }} width={46}
+                  <XAxis dataKey="year" tick={{ fill: palette.axis, fontSize: 11 }} axisLine={{ stroke: palette.grid }} tickLine={false} />
+                  <YAxis yAxisId="l" tick={{ fill: palette.axis, fontSize: 11 }} width={42} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="r" orientation="right" tick={{ fill: palette.axis, fontSize: 11 }} width={46}
                          axisLine={false} tickLine={false} tickFormatter={fmtTeu} />
-                  <Tooltip content={<CustomTooltip />} cursor={{ fill: '#ffffff08' }} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: palette.grid, fillOpacity: 0.25 }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={7} />
-                  <Bar yAxisId="l" dataKey="services" name="Services" fill="#008B8B" radius={[2, 2, 0, 0]} />
-                  <Line yAxisId="r" dataKey="capacity" name="Capacity (TEU)" stroke="#FFD700" strokeWidth={2} dot={false} />
+                  <Bar yAxisId="l" dataKey="services" name="Services" fill={ROUTE_COLORS['East/West']} radius={[2, 2, 0, 0]} />
+                  <Line yAxisId="r" dataKey="capacity" name="Capacity (TEU)" stroke="#D9A400" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             )}
@@ -135,19 +137,19 @@ export default function TradeRoute() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <Card title="Top Countries" subtitle={`on ${route1} routes, ${MAX_YEAR - 1}`}>
               <BarList rows={q.data.topCountries.map(c => ({ label: c.country_short_name, value: c.service_count }))}
-                       color="#4682B4" maxRows={14} />
+                       color={ROUTE_COLORS['Intra-Regional']} maxRows={14} />
             </Card>
             <Card title="Top Ports" subtitle={`on ${route1} routes, ${MAX_YEAR - 1}`}>
               <BarList rows={q.data.topPorts.map(p => ({ label: p.port_name ?? p.port_code, value: p.service_count }))}
-                       color="#4169E1" maxRows={14} />
+                       color={ROUTE_COLORS['Feeders']} maxRows={14} />
             </Card>
           </div>
 
-          <p className="text-[10px] text-[#3E5878] leading-relaxed">
+          <p className="text-[10px] leading-relaxed" style={{ color: 'var(--faint)' }}>
             Route hierarchy follows the eeSea trade-lane classification: level 1 (East/West,
             North/South, Intra-Regional, Feeders) › level 2 (E/W Primary vs Secondary) › level 3
             (individual lanes such as E/W FE_NAM). Distance and speed use{' '}
-            <span className="text-[#5A7196]">PORT_ARRIVAL</span> events, which include chokepoint
+            <span style={{ color: 'var(--dim)' }}>PORT_ARRIVAL</span> events, which include chokepoint
             transits since those are part of the route.
           </p>
         </>
