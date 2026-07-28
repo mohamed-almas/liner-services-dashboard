@@ -40,9 +40,9 @@ export default function PortConnectivity() {
 
   const ports = useQuery(async () => {
     const res = await supabase.from('mv_port_connectivity_current')
-      .select('port_code,port_name').gt('partner_ports', 0)
+      .select('port_code,port_name,country_name').gt('partner_ports', 0)
       .order('port_name').limit(1000)
-    return unwrap(res) as { port_code: string; port_name: string }[]
+    return unwrap(res) as { port_code: string; port_name: string; country_name: string }[]
   }, [])
 
   const q = useQuery(async () => {
@@ -88,7 +88,7 @@ export default function PortConnectivity() {
       >
         <Select
           value={port} onChange={setPort} placeholder=""
-          options={(ports.data ?? []).map(p => ({ value: p.port_code, label: `${p.port_name} (${p.port_code})` }))}
+          options={(ports.data ?? []).map(p => ({ value: p.port_code, label: `${p.port_name} — ${p.country_name}` }))}
         />
         <Tabs value={lookback} onChange={setLookback} options={[...LOOKBACK]} />
       </PageHeader>

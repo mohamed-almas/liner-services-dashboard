@@ -11,12 +11,13 @@ import {
 export default function PortTrend() {
   const [port, setPort] = useState('AEAUH')
 
+  // Full country name in the picker label, per the naming convention.
   const ports = useQuery(async () => {
     const res = await supabase.from('mv_port_current')
-      .select('port_code,port_name,country_code')
+      .select('port_code,port_name,country_name')
       .eq('is_chokepoint', false).gt('active_services', 0)
       .order('port_name').limit(1000)
-    return unwrap(res) as { port_code: string; port_name: string; country_code: string }[]
+    return unwrap(res) as { port_code: string; port_name: string; country_name: string }[]
   }, [])
 
   const q = useQuery(async () => {
@@ -58,7 +59,7 @@ export default function PortTrend() {
       >
         <Select
           value={port} onChange={setPort} placeholder=""
-          options={(ports.data ?? []).map(p => ({ value: p.port_code, label: `${p.port_name} (${p.port_code})` }))}
+          options={(ports.data ?? []).map(p => ({ value: p.port_code, label: `${p.port_name} — ${p.country_name}` }))}
         />
       </PageHeader>
 

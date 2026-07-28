@@ -17,7 +17,7 @@ export default function GlobalOverview() {
         .select('year,route_type,service_count,service_capacity_teu')
         .gte('year', MIN_YEAR).lte('year', MAX_YEAR).order('year'),
       supabase.from('mv_country_current')
-        .select('country_code,country_short_name,active_services,port_count')
+        .select('country_code,country_name,country_short_name,active_services,port_count')
         .order('active_services', { ascending: false }).limit(12),
       supabase.from('mv_liner_current')
         .select('company_name,active_services,vsa_capacity_teu')
@@ -42,7 +42,7 @@ export default function GlobalOverview() {
       countries: k?.countries ?? 0,
       liners: k?.liners ?? 0,
       byYear: unwrap(byYear) as { year: number; route_type: string; service_count: number; service_capacity_teu: number }[],
-      topCountries: unwrap(topCountries) as { country_code: string; country_short_name: string; active_services: number; port_count: number }[],
+      topCountries: unwrap(topCountries) as { country_code: string; country_name: string; country_short_name: string; active_services: number; port_count: number }[],
       topLiners: unwrap(topLiners) as { company_name: string; active_services: number; vsa_capacity_teu: number }[],
       topPorts: unwrap(topPorts) as { port_code: string; port_name: string; active_services: number }[],
     }
@@ -115,7 +115,7 @@ export default function GlobalOverview() {
         <Card title="Top Countries" subtitle="by active services">
           <BarList
             rows={d.topCountries.map(c => ({
-              label: c.country_short_name ?? c.country_code,
+              label: c.country_short_name ?? c.country_name,
               value: c.active_services,
             }))}
             color="#008B8B"

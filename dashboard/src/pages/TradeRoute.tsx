@@ -46,7 +46,7 @@ export default function TradeRoute() {
     const [series, topCountries, topPorts] = await Promise.all([
       sel.order('year'),
       supabase.from('mv_country_year')
-        .select('country_code,service_count')
+        .select('country_code,country_short_name,service_count')
         .eq('route_type', route1).eq('year', MAX_YEAR - 1)
         .order('service_count', { ascending: false }).limit(14),
       supabase.from('mv_port_year')
@@ -79,7 +79,7 @@ export default function TradeRoute() {
       byYear, latest,
       avgSpeed: speedRows.length ? speedRows.reduce((s, r) => s + r.avg_speed_kn, 0) / speedRows.length : null,
       avgPorts: speedRows.length ? speedRows.reduce((s, r) => s + (r.avg_ports_per_service ?? 0), 0) / speedRows.length : null,
-      topCountries: unwrap(topCountries) as { country_code: string; service_count: number }[],
+      topCountries: unwrap(topCountries) as { country_code: string; country_short_name: string; service_count: number }[],
       topPorts: unwrap(topPorts) as { port_code: string; port_name: string; service_count: number }[],
     }
   }, [route1, route2, route3])
@@ -134,7 +134,7 @@ export default function TradeRoute() {
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <Card title="Top Countries" subtitle={`on ${route1} routes, ${MAX_YEAR - 1}`}>
-              <BarList rows={q.data.topCountries.map(c => ({ label: c.country_code, value: c.service_count }))}
+              <BarList rows={q.data.topCountries.map(c => ({ label: c.country_short_name, value: c.service_count }))}
                        color="#4682B4" maxRows={14} />
             </Card>
             <Card title="Top Ports" subtitle={`on ${route1} routes, ${MAX_YEAR - 1}`}>

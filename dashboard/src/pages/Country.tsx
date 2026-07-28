@@ -11,11 +11,14 @@ import {
 export default function Country() {
   const [country, setCountry] = useState('AE')
 
+  // Full country name in the picker; charts use the short form.
   const countries = useQuery(async () => {
     const res = await supabase.from('mv_country_current')
-      .select('country_code,country_short_name,active_services')
-      .gt('active_services', 0).order('country_short_name').limit(300)
-    return unwrap(res) as { country_code: string; country_short_name: string; active_services: number }[]
+      .select('country_code,country_name,country_short_name,active_services')
+      .gt('active_services', 0).order('country_name').limit(300)
+    return unwrap(res) as {
+      country_code: string; country_name: string; country_short_name: string; active_services: number
+    }[]
   }, [])
 
   const q = useQuery(async () => {
@@ -52,13 +55,13 @@ export default function Country() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Country Overview"
+        title={k?.country_name ? `${k.country_name} — Country Overview` : 'Country Overview'}
         subtitle={k ? [k.subregion_un, k.continent, k.income_group_wb].filter(Boolean).join(' · ') : undefined}
       >
         <Select
           value={country} onChange={setCountry} placeholder=""
           options={(countries.data ?? []).map(c => ({
-            value: c.country_code, label: `${c.country_short_name ?? c.country_code} (${c.country_code})`,
+            value: c.country_code, label: c.country_name ?? c.country_short_name,
           }))}
         />
       </PageHeader>
@@ -90,7 +93,7 @@ export default function Country() {
               )}
             </Card>
 
-            <Card title={`Ports in ${k?.country_short_name ?? country}`} subtitle="by active services">
+            <Card title={`Ports in ${k?.country_name ?? country}`} subtitle="by active services">
               <BarList
                 rows={q.data.ports.map(p => ({ label: p.port_name ?? p.port_code, value: p.active_services }))}
                 color="#4169E1" maxRows={14}
@@ -101,7 +104,7 @@ export default function Country() {
           <Card title="Global Ranking" subtitle="top countries by active services">
             <BarList
               rows={q.data.topCountries.map(c => ({
-                label: c.country_short_name ?? c.country_code, value: c.active_services,
+                label: c.country_short_name, value: c.active_services,
               }))}
               color="#008B8B" maxRows={12}
             />

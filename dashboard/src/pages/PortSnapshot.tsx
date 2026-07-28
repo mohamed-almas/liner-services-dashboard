@@ -20,9 +20,9 @@ export default function PortSnapshot() {
 
   const ports = useQuery(async () => {
     const res = await supabase.from('mv_port_current')
-      .select('port_code,port_name').eq('is_chokepoint', false).gt('active_services', 0)
+      .select('port_code,port_name,country_name').eq('is_chokepoint', false).gt('active_services', 0)
       .order('port_name').limit(1000)
-    return unwrap(res) as { port_code: string; port_name: string }[]
+    return unwrap(res) as { port_code: string; port_name: string; country_name: string }[]
   }, [])
 
   const q = useQuery(async () => {
@@ -47,7 +47,7 @@ export default function PortSnapshot() {
       // Pre-aggregated server-side; the raw connectivity rows for a big port
       // exceed the 1000-row response cap and would silently truncate.
       supabase.from('mv_port_partner_country')
-        .select('partner_country_code,partner_ports,direct_ports')
+        .select('partner_country_short_name,partner_ports,direct_ports')
         .eq('port_code', port).order('partner_ports', { ascending: false }).limit(20),
     ])
 
@@ -56,8 +56,8 @@ export default function PortSnapshot() {
       conn: conn.data as Record<string, number> | null,
       services: (services.data ?? []) as Svc[],
       topPartnerCountries: ((partners.data ?? []) as {
-        partner_country_code: string; partner_ports: number
-      }[]).map(r => ({ label: r.partner_country_code, value: r.partner_ports })),
+        partner_country_short_name: string; partner_ports: number
+      }[]).map(r => ({ label: r.partner_country_short_name, value: r.partner_ports })),
     }
   }, [port], { skip: !port })
 
@@ -76,7 +76,7 @@ export default function PortSnapshot() {
       >
         <Select
           value={port} onChange={setPort} placeholder=""
-          options={(ports.data ?? []).map(p => ({ value: p.port_code, label: `${p.port_name} (${p.port_code})` }))}
+          options={(ports.data ?? []).map(p => ({ value: p.port_code, label: `${p.port_name} — ${p.country_name}` }))}
         />
       </PageHeader>
 

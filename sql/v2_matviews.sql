@@ -17,9 +17,17 @@
 --     PBI 02b Ports + 03a1 Country + 03a4 ADPG Cluster + 03a5 Coastal Region
 --     chain into one table (1155 ports, joins cleanly on "Port ID" = port_code).
 --
--- NOTE on chokepoints: the PBI model identifies them by hardcoded name match
--- on 4 ports and therefore MISSES Canakkale. Deriving the flag from "appears
--- as PORT_ARRIVAL but never BERTH_ARRIVAL" catches all 5 structurally.
+-- CHOKEPOINTS: the four maritime passages, by name, matching Power BI:
+--   Suez Canal, Panama Canal, Cape of Good Hope, Cape Horn.
+-- Do NOT infer this from "has PORT_ARRIVAL but no BERTH_ARRIVAL" — that also
+-- catches Canakkale, which is a real port on the Dardanelles Strait
+-- (portofcanakkale.com). It appears with 1 service and no berth-level detail,
+-- which is a coverage gap in the feed, not a passage.
+--
+-- COUNTRY LABELS: country_name is the full form ("United States of America")
+-- for page headers and pickers; country_short_name is the compact form
+-- ("USA", "S. Korea") for chart axis labels. Never render a raw ISO code in
+-- a chart — carry the name column through the aggregate instead.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -107,27 +115,29 @@ GRANT SELECT ON mv_service_base TO anon, authenticated;
 -- ---------------------------------------------------------------------
 DROP MATERIALIZED VIEW IF EXISTS mv_port_dim CASCADE;
 CREATE MATERIALIZED VIEW mv_port_dim AS
-WITH berth_ports   AS (SELECT DISTINCT port_code FROM eesea_service_proformas WHERE event_type='BERTH_ARRIVAL'),
-     arrival_ports AS (SELECT DISTINCT port_code FROM eesea_service_proformas WHERE event_type='PORT_ARRIVAL')
+WITH berth_ports AS (
+  SELECT DISTINCT port_code FROM eesea_service_proformas WHERE event_type='BERTH_ARRIVAL'
+)
 SELECT
   m."Port ID" AS port_code, m."Port" AS port_name, m."Port alias" AS port_alias,
   m."adpg_port_id", m."portLat" AS port_lat, m."portLon" AS port_lon,
   m."Coastal Region" AS coastal_region, m."Clarksons Region" AS clarksons_region,
   m."Project" AS project, m."Project Region" AS project_region,
-  m."iso2Code" AS country_code, m."countryName" AS country_name,
-  m."Country" AS country, m."Country Short Name" AS country_short_name,
+  m."iso2Code"           AS country_code,
+  m."countryName"        AS country_name,        -- full form, for headers/pickers
+  m."Country Short Name" AS country_short_name,  -- compact form, for chart labels
+  m."Country"            AS country_sort_name,
   m."adpg_country_id", m."Region" AS region,
   m."Continent" AS continent, m."Continent Code" AS continent_code,
   m."Region (UN)" AS region_un, m."Sub-region (UN)" AS subregion_un,
   m."Region (WB)" AS region_wb, m."Income group (WB)" AS income_group_wb,
   m."Flag" AS flag, m."ADPG Group" AS adpg_group, m."ADPG Ports" AS adpg_ports,
-  (a.port_code IS NOT NULL AND b.port_code IS NULL) AS is_chokepoint,
-  CASE WHEN a.port_code IS NOT NULL AND b.port_code IS NULL
+  (m."Port" IN ('Suez Canal','Panama Canal','Cape of Good Hope','Cape Horn')) AS is_chokepoint,
+  CASE WHEN m."Port" IN ('Suez Canal','Panama Canal','Cape of Good Hope','Cape Horn')
        THEN 'Chokepoint' ELSE 'Port' END AS port_or_chokepoint,
   (b.port_code IS NOT NULL) AS has_berth_calls
 FROM "ml_liners_ports_&_geo" m
-LEFT JOIN berth_ports   b ON b.port_code = m."Port ID"
-LEFT JOIN arrival_ports a ON a.port_code = m."Port ID";
+LEFT JOIN berth_ports b ON b.port_code = m."Port ID";
 
 CREATE UNIQUE INDEX ON mv_port_dim (port_code);
 CREATE INDEX ON mv_port_dim (country_code);
