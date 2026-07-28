@@ -368,6 +368,171 @@ CREATE UNIQUE INDEX ON mv_liner_current (company_code);
 CREATE INDEX ON mv_liner_current (service_capacity_teu DESC);
 GRANT SELECT ON mv_liner_current TO anon, authenticated;
 
+-- =====================================================================
+-- PHASE 2 — point-in-time bridge + connectivity network
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- mv_service_month — point-in-time snapshot bridge.
+-- A service version belongs to month M if it is valid ON the last day of M.
+-- PBI expands to one row per DAY (4.7M rows) because its slicer allows any
+-- date; the dashboard compares by month and PBI's Prev_Months measure uses
+-- EDATE() (month-end -> month-end), so month grain returns identical answers
+-- at ~3% of the rows. 154,805 rows / 312 months (2001-01 .. 2026-12).
+-- Cross-checked: Jul-2026 gives 1,697 services vs is_current 1,693.
+-- ---------------------------------------------------------------------
+DROP MATERIALIZED VIEW IF EXISTS mv_service_month CASCADE;
+CREATE MATERIALIZED VIEW mv_service_month AS
+WITH bounds AS (
+  SELECT (SELECT MAX(service_version_end_datetime_lt::date) FROM eesea_service_versions) AS global_max
+),
+months AS (
+  SELECT (m)::date AS month_start,
+         (m + INTERVAL '1 month - 1 day')::date AS month_end
+  FROM bounds b,
+       generate_series(date_trunc('month',(SELECT MIN(service_version_start_datetime_lt::date)
+                                           FROM eesea_service_versions)),
+                       date_trunc('month', b.global_max),
+                       INTERVAL '1 month') AS m
+)
+SELECT sb.service_version_id, sb.service_master_name, sb.alliance_code,
+       sb.trade_route_1, sb.trade_route_2, sb.trade_route_3, sb.trade_lane_category,
+       sb.service_capacity_teu, sb.annual_capacity_teu,
+       sb.annual_rotations, sb.vessels_deployed, sb.service_version_port_count,
+       mo.month_start, mo.month_end,
+       EXTRACT(YEAR  FROM mo.month_start)::int AS year,
+       EXTRACT(MONTH FROM mo.month_start)::int AS month
+FROM mv_service_base sb
+CROSS JOIN bounds b
+JOIN months mo
+  ON sb.valid_from <= mo.month_end
+ AND COALESCE(sb.valid_to, b.global_max) >= mo.month_end
+WHERE sb.valid_from IS NOT NULL;
+
+CREATE INDEX ON mv_service_month (month_start);
+CREATE INDEX ON mv_service_month (service_version_id);
+CREATE INDEX ON mv_service_month (month_start, trade_route_1);
+CREATE INDEX ON mv_service_month (year, month);
+GRANT SELECT ON mv_service_month TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- mv_port_connectivity — replicates the PBI 'ports_by_service' Power Query
+-- cross-join. For every call on a rotation, emits one row per OTHER call on
+-- that rotation (the "partner"), carrying the NEXT call in sequence
+-- (circular: last wraps to first). BERTH_ARRIVAL grain -> no chokepoints.
+-- 862,514 rows / 983 origin ports / 13,445 versions.
+-- ---------------------------------------------------------------------
+DROP MATERIALIZED VIEW IF EXISTS mv_port_connectivity CASCADE;
+CREATE MATERIALIZED VIEW mv_port_connectivity AS
+WITH calls AS (
+  SELECT sp.service_version_id, sp.port_code, sp.service_call_order,
+         sp.service_event_order, sp.proforma_terminal_name,
+         ROW_NUMBER() OVER (PARTITION BY sp.service_version_id
+                            ORDER BY sp.service_call_order, sp.service_event_order) AS rn,
+         COUNT(*)     OVER (PARTITION BY sp.service_version_id) AS n_calls
+  FROM eesea_service_proformas sp
+  WHERE sp.event_type = 'BERTH_ARRIVAL'
+),
+with_next AS (
+  SELECT c.*,
+         COALESCE(LEAD(c.port_code) OVER w, FIRST_VALUE(c.port_code) OVER w) AS next_port_code,
+         COALESCE(LEAD(c.service_call_order) OVER w, FIRST_VALUE(c.service_call_order) OVER w) AS next_call_order,
+         COALESCE(LEAD(c.proforma_terminal_name) OVER w, FIRST_VALUE(c.proforma_terminal_name) OVER w) AS next_terminal
+  FROM calls c
+  WINDOW w AS (PARTITION BY c.service_version_id ORDER BY c.rn)
+)
+SELECT
+  o.service_version_id,
+  o.port_code, o.service_call_order AS call_order, o.proforma_terminal_name AS terminal,
+  od.country_code, od.coastal_region,
+  p.port_code AS partner_port_code, p.service_call_order AS partner_call_order,
+  p.proforma_terminal_name AS partner_terminal,
+  pdim.country_code AS partner_country_code, pdim.coastal_region AS partner_coastal_region,
+  o.next_port_code, o.next_call_order, o.next_terminal,
+  nd.country_code AS next_country_code,
+  (p.port_code = o.next_port_code) AS is_direct,
+  CASE WHEN p.port_code = o.next_port_code THEN 'Direct' ELSE 'Indirect' END AS partner_next_port_same,
+  CASE WHEN od.country_code = pdim.country_code THEN 'Repeated' ELSE 'Distinct' END AS distinct_partner_country,
+  CASE WHEN o.port_code = p.port_code           THEN 'Repeated' ELSE 'Distinct' END AS distinct_partner_port,
+  CASE WHEN od.country_code = nd.country_code   THEN 'Repeated' ELSE 'Distinct' END AS distinct_next_country,
+  CASE WHEN o.port_code = o.next_port_code      THEN 'Repeated' ELSE 'Distinct' END AS distinct_next_port
+FROM with_next o
+JOIN with_next p ON p.service_version_id = o.service_version_id AND p.rn <> o.rn
+LEFT JOIN mv_port_dim od   ON od.port_code   = o.port_code
+LEFT JOIN mv_port_dim pdim ON pdim.port_code = p.port_code
+LEFT JOIN mv_port_dim nd   ON nd.port_code   = o.next_port_code;
+
+CREATE INDEX ON mv_port_connectivity (port_code);
+CREATE INDEX ON mv_port_connectivity (service_version_id);
+CREATE INDEX ON mv_port_connectivity (port_code, is_direct);
+CREATE INDEX ON mv_port_connectivity (country_code);
+GRANT SELECT ON mv_port_connectivity TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- mv_port_connectivity_current — PBI Partners measures.
+-- Validated vs PBI: Shanghai 280/283 partner ports, Busan 270/273,
+-- Singapore 236/239, Rotterdam 221/224; partner countries near-exact.
+-- AEAUH: 8 services / 11 liners — exact match to PBI.
+-- ---------------------------------------------------------------------
+DROP MATERIALIZED VIEW IF EXISTS mv_port_connectivity_current CASCADE;
+CREATE MATERIALIZED VIEW mv_port_connectivity_current AS
+WITH cc AS (
+  SELECT c.* FROM mv_port_connectivity c
+  JOIN mv_service_base sb ON sb.service_version_id = c.service_version_id
+  WHERE sb.is_current
+)
+SELECT
+  pd.port_code, pd.port_name, pd.country_code, pd.country_name,
+  pd.coastal_region, pd.port_lat, pd.port_lon,
+  COUNT(DISTINCT cc.partner_port_code)                                    AS partner_ports,
+  COUNT(DISTINCT cc.partner_port_code) FILTER (WHERE cc.is_direct)        AS direct_ports,
+  COUNT(DISTINCT cc.partner_port_code)
+    - COUNT(DISTINCT cc.partner_port_code) FILTER (WHERE cc.is_direct)    AS indirect_ports,
+  COUNT(DISTINCT cc.partner_port_code)
+    FILTER (WHERE cc.distinct_partner_port = 'Distinct')                  AS partner_ports_ex_same,
+  COUNT(DISTINCT cc.partner_country_code)                                 AS partner_countries,
+  COUNT(DISTINCT cc.partner_country_code) FILTER (WHERE cc.is_direct)     AS direct_countries,
+  COUNT(DISTINCT cc.partner_country_code)
+    - COUNT(DISTINCT cc.partner_country_code) FILTER (WHERE cc.is_direct) AS indirect_countries,
+  COUNT(DISTINCT cc.partner_country_code)
+    FILTER (WHERE cc.distinct_partner_country = 'Distinct')               AS partner_countries_ex_same,
+  COUNT(DISTINCT cc.partner_coastal_region)                               AS partner_coastal_regions,
+  COUNT(DISTINCT cc.service_version_id)                                   AS versions
+FROM mv_port_dim pd
+LEFT JOIN cc ON cc.port_code = pd.port_code
+GROUP BY 1,2,3,4,5,6,7;
+
+CREATE UNIQUE INDEX ON mv_port_connectivity_current (port_code);
+CREATE INDEX ON mv_port_connectivity_current (partner_ports DESC);
+GRANT SELECT ON mv_port_connectivity_current TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- mv_port_connectivity_qtr — quarterly snapshots (26,672 rows / 39 dates).
+-- Supports the Prev_Months comparison (3/6/9/12/24/36 back) without
+-- materializing all 312 months (~630ms each = too slow to refresh).
+-- ---------------------------------------------------------------------
+DROP MATERIALIZED VIEW IF EXISTS mv_port_connectivity_qtr CASCADE;
+CREATE MATERIALIZED VIEW mv_port_connectivity_qtr AS
+SELECT c.port_code, sm.month_start::date AS as_of, sm.year,
+       EXTRACT(QUARTER FROM sm.month_start)::int AS quarter,
+       COUNT(DISTINCT c.service_version_id)                                  AS versions,
+       COUNT(DISTINCT c.partner_port_code)                                   AS partner_ports,
+       COUNT(DISTINCT c.partner_port_code) FILTER (WHERE c.is_direct)        AS direct_ports,
+       COUNT(DISTINCT c.partner_port_code)
+         - COUNT(DISTINCT c.partner_port_code) FILTER (WHERE c.is_direct)    AS indirect_ports,
+       COUNT(DISTINCT c.partner_country_code)                                AS partner_countries,
+       COUNT(DISTINCT c.partner_country_code) FILTER (WHERE c.is_direct)     AS direct_countries,
+       COUNT(DISTINCT c.partner_country_code)
+         - COUNT(DISTINCT c.partner_country_code) FILTER (WHERE c.is_direct) AS indirect_countries
+FROM mv_port_connectivity c
+JOIN mv_service_month sm ON sm.service_version_id = c.service_version_id
+WHERE sm.month IN (3,6,9,12) AND sm.year BETWEEN 2017 AND 2026
+GROUP BY 1,2,3,4;
+
+CREATE INDEX ON mv_port_connectivity_qtr (port_code, as_of);
+CREATE INDEX ON mv_port_connectivity_qtr (as_of);
+GRANT SELECT ON mv_port_connectivity_qtr TO anon, authenticated;
+
 -- ---------------------------------------------------------------------
 -- Refresh function (statement_timeout = 0 bypasses the PostgREST 10s limit)
 -- ---------------------------------------------------------------------
@@ -376,16 +541,23 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET statement_timeout = 0
 AS $$
 BEGIN
+  -- Legacy (kept until the dashboard is fully migrated off them)
   REFRESH MATERIALIZED VIEW mv_service_overview;
   REFRESH MATERIALIZED VIEW mv_terminals;
   REFRESH MATERIALIZED VIEW mv_port_activity;
   REFRESH MATERIALIZED VIEW mv_reliability_monthly;
   REFRESH MATERIALIZED VIEW mv_port_calls_by_year;
 
+  -- Dimensions and base
   REFRESH MATERIALIZED VIEW mv_service_base;
   REFRESH MATERIALIZED VIEW mv_port_dim;
-  REFRESH MATERIALIZED VIEW mv_service_year;
   REFRESH MATERIALIZED VIEW mv_service_port_berth;
+
+  -- Time bridges
+  REFRESH MATERIALIZED VIEW mv_service_year;
+  REFRESH MATERIALIZED VIEW mv_service_month;
+
+  -- Aggregations
   REFRESH MATERIALIZED VIEW mv_port_year;
   REFRESH MATERIALIZED VIEW mv_port_current;
   REFRESH MATERIALIZED VIEW mv_country_year;
@@ -395,5 +567,31 @@ BEGIN
   REFRESH MATERIALIZED VIEW mv_trade_route_year;
   REFRESH MATERIALIZED VIEW mv_liner_year;
   REFRESH MATERIALIZED VIEW mv_liner_current;
+
+  -- Connectivity (must follow mv_port_dim + mv_service_month)
+  REFRESH MATERIALIZED VIEW mv_port_connectivity;
+  REFRESH MATERIALIZED VIEW mv_port_connectivity_current;
+  REFRESH MATERIALIZED VIEW mv_port_connectivity_qtr;
 END;
 $$;
+
+-- =====================================================================
+-- DASHBOARD NOTES
+--
+-- 1. Point-in-time vs annual are DIFFERENT questions and differ a lot.
+--    AEAUH: 8 services active right now, but 41 called during 2026 and 55
+--    during 2025. Both verified against PBI. Label KPI cards "as of today"
+--    and annual charts "services calling during year" so the gap reads as
+--    intentional rather than a bug.
+--
+-- 2. Do NOT SUM(service_count) across route_type rows to get a total. A
+--    service master name can have versions on different trade lanes, so the
+--    segments slightly exceed the distinct total (AEAUH 2023: 45 summed vs 44
+--    distinct). Fine inside a stacked bar; wrong for a KPI. PBI behaves the
+--    same way.
+--
+-- 3. Forward months are thin. Only 108 of 1,777 current versions carry an end
+--    date, so open-ended ones ride to the global max (2026-12-20) while
+--    ended ones drop out — later snapshots understate. Cap charts at the
+--    current month.
+-- =====================================================================
