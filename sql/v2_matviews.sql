@@ -533,6 +533,94 @@ CREATE INDEX ON mv_port_connectivity_qtr (port_code, as_of);
 CREATE INDEX ON mv_port_connectivity_qtr (as_of);
 GRANT SELECT ON mv_port_connectivity_qtr TO anon, authenticated;
 
+-- =====================================================================
+-- PHASE 3 — views that exist specifically to keep the client honest.
+--
+-- PostgREST caps any single response at 1000 rows and returns no error when it
+-- truncates. Aggregating in the browser therefore produced a silently wrong
+-- "1,000 active services" KPI (true value 1,693) and 1.3M TEU (true 5.6M).
+-- Anything the dashboard needs as a TOTAL is now aggregated server-side.
+-- =====================================================================
+
+-- Single-row global KPI roll-up.
+DROP MATERIALIZED VIEW IF EXISTS mv_global_current CASCADE;
+CREATE MATERIALIZED VIEW mv_global_current AS
+SELECT
+  1 AS id,
+  (SELECT COUNT(DISTINCT service_master_name) FROM mv_service_base WHERE is_current)       AS active_services,
+  (SELECT COUNT(*)                            FROM mv_service_base WHERE is_current)       AS active_versions,
+  (SELECT ROUND(SUM(service_capacity_teu))    FROM mv_service_base WHERE is_current)       AS service_capacity_teu,
+  (SELECT ROUND(SUM(annual_capacity_teu))     FROM mv_service_base WHERE is_current)       AS annual_capacity_teu,
+  (SELECT ROUND(SUM(vessels_deployed))        FROM mv_service_base WHERE is_current)       AS vessels_deployed,
+  (SELECT COUNT(*) FROM mv_country_current WHERE active_services > 0)                      AS countries,
+  (SELECT COUNT(*) FROM mv_port_current    WHERE active_services > 0 AND NOT is_chokepoint) AS ports,
+  (SELECT COUNT(*) FROM mv_port_current    WHERE is_chokepoint)                            AS chokepoints,
+  (SELECT COUNT(*) FROM mv_liner_current)                                                  AS liners;
+CREATE UNIQUE INDEX ON mv_global_current (id);
+GRANT SELECT ON mv_global_current TO anon, authenticated;
+
+-- Partner countries per origin port. The raw connectivity rows for a large port
+-- run into the thousands and would be truncated client-side.
+DROP MATERIALIZED VIEW IF EXISTS mv_port_partner_country CASCADE;
+CREATE MATERIALIZED VIEW mv_port_partner_country AS
+SELECT c.port_code, c.partner_country_code,
+       COUNT(DISTINCT c.partner_port_code)                            AS partner_ports,
+       COUNT(DISTINCT c.partner_port_code) FILTER (WHERE c.is_direct) AS direct_ports,
+       COUNT(DISTINCT c.service_version_id)                           AS services
+FROM mv_port_connectivity c
+JOIN mv_service_base sb ON sb.service_version_id = c.service_version_id
+WHERE sb.is_current AND c.partner_country_code IS NOT NULL
+GROUP BY 1,2;
+CREATE INDEX ON mv_port_partner_country (port_code, partner_ports DESC);
+GRANT SELECT ON mv_port_partner_country TO anon, authenticated;
+
+-- Coastal region DISTINCT totals per year — one row per region-year. Summing the
+-- per-route-type rows double-counts services whose versions span trade lanes.
+DROP MATERIALIZED VIEW IF EXISTS mv_coastal_year_total CASCADE;
+CREATE MATERIALIZED VIEW mv_coastal_year_total AS
+SELECT pd.coastal_region, sy.year,
+       COUNT(DISTINCT sy.service_master_name) AS service_count,
+       COUNT(DISTINCT spb.port_code)          AS port_count,
+       COUNT(DISTINCT pd.country_code)        AS country_count
+FROM mv_service_port_berth spb
+JOIN mv_service_year sy ON sy.service_version_id = spb.service_version_id
+JOIN mv_port_dim   pd  ON pd.port_code = spb.port_code
+WHERE pd.coastal_region IS NOT NULL
+GROUP BY 1,2;
+CREATE INDEX ON mv_coastal_year_total (year, service_count DESC);
+GRANT SELECT ON mv_coastal_year_total TO anon, authenticated;
+
+-- 13-row route hierarchy for the cascading Trade Route pickers.
+DROP VIEW IF EXISTS v_trade_route_tree CASCADE;
+CREATE VIEW v_trade_route_tree AS
+SELECT DISTINCT trade_route_1, trade_route_2, trade_route_3
+FROM ref_tradelane_classification;
+GRANT SELECT ON v_trade_route_tree TO anon, authenticated;
+
+-- One row per service master name, with a representative version, whether any
+-- version is currently active, and the version count. Backs the Service and
+-- Service Evolution pickers (still paged: 3,381 names exceed the 1000 cap).
+DROP MATERIALIZED VIEW IF EXISTS mv_service_names CASCADE;
+CREATE MATERIALIZED VIEW mv_service_names AS
+WITH pick AS (
+  SELECT DISTINCT ON (sb.service_master_name)
+         sb.service_master_name, sb.service_master_name_incl_trade_lane,
+         sb.service_version_id AS current_version_id,
+         sb.trade_route_1, sb.service_capacity_teu, sb.is_current
+  FROM mv_service_base sb
+  ORDER BY sb.service_master_name, sb.is_current DESC, sb.valid_from DESC NULLS LAST
+),
+counts AS (
+  SELECT service_master_name, COUNT(*) AS version_count FROM mv_service_base GROUP BY 1
+)
+SELECT p.service_master_name, p.service_master_name_incl_trade_lane,
+       p.current_version_id, p.trade_route_1, p.service_capacity_teu,
+       p.is_current AS has_current, c.version_count
+FROM pick p JOIN counts c USING (service_master_name);
+CREATE UNIQUE INDEX ON mv_service_names (service_master_name);
+CREATE INDEX ON mv_service_names (has_current, service_capacity_teu DESC);
+GRANT SELECT ON mv_service_names TO anon, authenticated;
+
 -- ---------------------------------------------------------------------
 -- Refresh function (statement_timeout = 0 bypasses the PostgREST 10s limit)
 -- ---------------------------------------------------------------------
@@ -552,6 +640,7 @@ BEGIN
   REFRESH MATERIALIZED VIEW mv_service_base;
   REFRESH MATERIALIZED VIEW mv_port_dim;
   REFRESH MATERIALIZED VIEW mv_service_port_berth;
+  REFRESH MATERIALIZED VIEW mv_service_names;
 
   -- Time bridges
   REFRESH MATERIALIZED VIEW mv_service_year;
@@ -563,6 +652,7 @@ BEGIN
   REFRESH MATERIALIZED VIEW mv_country_year;
   REFRESH MATERIALIZED VIEW mv_country_current;
   REFRESH MATERIALIZED VIEW mv_coastal_year;
+  REFRESH MATERIALIZED VIEW mv_coastal_year_total;
   REFRESH MATERIALIZED VIEW mv_global_year;
   REFRESH MATERIALIZED VIEW mv_trade_route_year;
   REFRESH MATERIALIZED VIEW mv_liner_year;
@@ -572,6 +662,10 @@ BEGIN
   REFRESH MATERIALIZED VIEW mv_port_connectivity;
   REFRESH MATERIALIZED VIEW mv_port_connectivity_current;
   REFRESH MATERIALIZED VIEW mv_port_connectivity_qtr;
+  REFRESH MATERIALIZED VIEW mv_port_partner_country;
+
+  -- Global roll-up last: it reads the views above
+  REFRESH MATERIALIZED VIEW mv_global_current;
 END;
 $$;
 

@@ -1,66 +1,106 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { supabase } from '../lib/supabase'
-import { KPICard, Card, Spinner, ErrorMsg, Select, ROUTE_COLORS, CustomTooltip, pivotByRouteType } from '../components/ui'
+import { useQuery, unwrap } from '../lib/useQuery'
+import {
+  KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, BarList,
+  ROUTE_COLORS, ROUTE_ORDER, CustomTooltip, pivotByRoute, fmtTeu,
+  MIN_YEAR, MAX_YEAR,
+} from '../components/ui'
 
 export default function CoastalRegion() {
-  const [regions, setRegions] = useState<{ value: string; label: string }[]>([])
-  const [selected, setSelected] = useState('')
-  const [byYear, setByYear] = useState<Record<string, number>[]>([])
-  const [kpi, setKpi] = useState({ services: 0, ports: 0, countries: 0 })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [region, setRegion] = useState('')
 
-  useEffect(() => {
-    supabase.from('mv_coastal_region_by_year').select('coastal_region_code,coastal_region_name').order('coastal_region_name').limit(200)
-      .then(({ data }) => {
-        const unique = [...new Map((data ?? []).map(r => [r.coastal_region_code, r])).values()]
-        setRegions(unique.map(r => ({ value: r.coastal_region_code, label: r.coastal_region_name ?? r.coastal_region_code })))
-        if (unique.length > 0 && !selected) setSelected(unique[0].coastal_region_code)
-      })
+  const regions = useQuery(async () => {
+    const res = await supabase.from('mv_coastal_year_total')
+      .select('coastal_region').eq('year', MAX_YEAR - 1).order('coastal_region')
+    const rows = unwrap(res) as { coastal_region: string }[]
+    return Array.from(new Set(rows.map(r => r.coastal_region).filter(Boolean))).sort()
   }, [])
 
+  // Default to the first region once the list arrives
   useEffect(() => {
-    if (!selected) return
-    setLoading(true); setError('')
-    Promise.all([
-      supabase.from('mv_coastal_region_by_year').select('*').eq('coastal_region_code', selected).gte('year', 2019).lte('year', 2026).order('year'),
-      supabase.from('mv_port_kpis_current').select('port_code,port_country_code').eq('coastal_region_code', selected).limit(200),
-    ]).then(([byYearRes, portsRes]) => {
-      setByYear(pivotByRouteType((byYearRes.data ?? []) as { year: number; route_type: string; service_count: number }[]))
-      const ports = portsRes.data ?? []
-      const countries = new Set(ports.map(p => p.port_country_code)).size
-      setKpi({ services: (byYearRes.data ?? []).filter(r => r.year === 2025).reduce((s, r) => s + (r.service_count ?? 0), 0), ports: ports.length, countries })
-    }).catch(e => setError(String(e)))
-      .finally(() => setLoading(false))
-  }, [selected])
+    if (!region && regions.data?.length) setRegion(regions.data[0])
+  }, [regions.data, region])
+
+  const q = useQuery(async () => {
+    const [byYear, ports, allRegions] = await Promise.all([
+      supabase.from('mv_coastal_year')
+        .select('year,route_type,service_count,port_count,country_count')
+        .eq('coastal_region', region).gte('year', MIN_YEAR).lte('year', MAX_YEAR).order('year'),
+      supabase.from('mv_port_current')
+        .select('port_code,port_name,country_code,active_services,service_capacity_teu')
+        .eq('coastal_region', region).eq('is_chokepoint', false)
+        .order('active_services', { ascending: false }).limit(20),
+      // Distinct totals per region-year, pre-aggregated: summing the per-route
+      // rows would double-count services that span multiple trade lanes.
+      supabase.from('mv_coastal_year_total')
+        .select('coastal_region,service_count,port_count,country_count')
+        .eq('year', MAX_YEAR - 1).order('service_count', { ascending: false }),
+    ])
+
+    const rows = unwrap(byYear) as { year: number; route_type: string; service_count: number; port_count: number; country_count: number }[]
+    const totals = unwrap(allRegions) as {
+      coastal_region: string; service_count: number; port_count: number; country_count: number
+    }[]
+    const mine = totals.find(t => t.coastal_region === region)
+
+    return {
+      byYear: rows,
+      ports: unwrap(ports) as { port_code: string; port_name: string; active_services: number; service_capacity_teu: number }[],
+      ranking: totals.map(t => ({ label: t.coastal_region, value: t.service_count })),
+      services: mine?.service_count ?? 0,
+      countries: mine?.country_count ?? 0,
+    }
+  }, [region], { skip: !region })
+
+  const capacity = q.data?.ports.reduce((s, p) => s + (p.service_capacity_teu ?? 0), 0) ?? 0
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-4">
-        <h1 className="text-xl font-bold text-white">Coastal Region Overview</h1>
-        <Select value={selected} onChange={setSelected} options={regions} placeholder="Select region..." />
-      </div>
+      <PageHeader title="Coastal Region Overview" subtitle={region || undefined}>
+        <Select
+          value={region} onChange={setRegion} placeholder="Select region..."
+          options={(regions.data ?? []).map(r => ({ value: r, label: r }))}
+        />
+      </PageHeader>
 
-      {loading ? <Spinner /> : error ? <ErrorMsg msg={error} /> : (
+      {regions.loading || q.loading ? <Spinner /> : q.error ? <ErrorMsg msg={q.error} /> : !q.data ? null : (
         <>
-          <div className="grid grid-cols-4 gap-4">
-            <KPICard label="Currently Active Services" value={kpi.services} accent />
-            <KPICard label="No. of Countries" value={kpi.countries} />
-            <KPICard label="No. of Ports" value={kpi.ports} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KPICard label={`Services (${MAX_YEAR - 1})`} value={q.data.services} accent sub="calling during year" />
+            <KPICard label="Countries" value={q.data.countries} />
+            <KPICard label="Ports" value={q.data.ports.length} sub="with berth calls" />
+            <KPICard label="Deployed Capacity" value={fmtTeu(capacity)} sub="TEU across region ports" />
           </div>
-          <Card title="Active Services Evolution">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={byYear} margin={{ top: 5, right: 10, bottom: 0, left: 0 }}>
-                <XAxis dataKey="year" tick={{ fill: '#94A3B8', fontSize: 11 }} />
-                <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} width={35} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                {Object.entries(ROUTE_COLORS).map(([rt, color]) => (
-                  <Bar key={rt} dataKey={rt} stackId="a" fill={color} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <Card title="Active Services by Trade Route" subtitle="services calling during each year">
+              {q.data.byYear.length === 0 ? <Empty /> : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={pivotByRoute(q.data.byYear)} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <XAxis dataKey="year" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: '#1E3A5F' }} tickLine={false} />
+                    <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} width={38} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: '#ffffff08' }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={7} />
+                    {ROUTE_ORDER.map(rt => (
+                      <Bar key={rt} dataKey={rt} stackId="a" fill={ROUTE_COLORS[rt]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+
+            <Card title="Ports in Region" subtitle="by active services">
+              <BarList
+                rows={q.data.ports.map(p => ({ label: p.port_name ?? p.port_code, value: p.active_services }))}
+                color="#4169E1" maxRows={14}
+              />
+            </Card>
+          </div>
+
+          <Card title="All Coastal Regions" subtitle={`ranked by services calling in ${MAX_YEAR - 1}`}>
+            <BarList rows={q.data.ranking} color="#4682B4" maxRows={16} />
           </Card>
         </>
       )}

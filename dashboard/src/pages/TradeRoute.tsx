@@ -1,118 +1,155 @@
-import { useEffect, useState } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line } from 'recharts'
+import { useState, useEffect } from 'react'
+import { XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ComposedChart, Bar, Line } from 'recharts'
 import { supabase } from '../lib/supabase'
-import { KPICard, Card, Spinner, ErrorMsg, Select, CustomTooltip } from '../components/ui'
+import { useQuery, unwrap } from '../lib/useQuery'
+import {
+  KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, Tabs, BarList,
+  CustomTooltip, fmtTeu, fmt, MIN_YEAR, MAX_YEAR,
+} from '../components/ui'
 
-const ROUTE_TYPES = ['East/West', 'North/South', 'Intra-Regional', 'Feeders']
+const ROUTE_1 = ['East/West', 'North/South', 'Intra-Regional', 'Feeders']
 
 export default function TradeRoute() {
-  const [routeType, setRouteType] = useState('East/West')
-  const [subRoutes, setSubRoutes] = useState<{ value: string; label: string }[]>([])
-  const [subRoute, setSubRoute] = useState('')
-  const [byYear, setByYear] = useState<{ year: number; service_count: number; total_capacity_teu: number }[]>([])
-  const [topCountries, setTopCountries] = useState<{ country_code: string; service_count: number }[]>([])
-  const [topPorts, setTopPorts] = useState<{ port_code: string; service_count: number }[]>([])
-  const [kpi, setKpi] = useState({ services: 0, capacity: 0 })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [route1, setRoute1] = useState('East/West')
+  const [route2, setRoute2] = useState('')   // '' = all
+  const [route3, setRoute3] = useState('')   // '' = all
 
-  useEffect(() => {
-    supabase.from('mv_trade_route_by_year').select('trade_lane_category,route_type').eq('route_type', routeType).limit(100)
-      .then(({ data }) => {
-        const unique = [...new Map((data ?? []).map(r => [r.trade_lane_category, r])).values()]
-        setSubRoutes(unique.map(r => ({ value: r.trade_lane_category, label: r.trade_lane_category })))
-        setSubRoute('')
-      })
-  }, [routeType])
+  // Sub-route options from the 13-row classification tree
+  const subs = useQuery(async () => {
+    const res = await supabase.from('v_trade_route_tree')
+      .select('trade_route_2,trade_route_3').eq('trade_route_1', route1)
+    const rows = unwrap(res) as { trade_route_2: string; trade_route_3: string }[]
+    return {
+      level2: Array.from(new Set(rows.map(r => r.trade_route_2).filter(Boolean))).sort(),
+      pairs: rows,
+    }
+  }, [route1])
 
-  useEffect(() => {
-    setLoading(true); setError('')
-    const filter = subRoute || routeType
-    const isSubRoute = !!subRoute
-    Promise.all([
-      supabase.from('mv_trade_route_by_year').select('year,service_count,total_capacity_teu')
-        .eq(isSubRoute ? 'trade_lane_category' : 'route_type', filter)
-        .gte('year', 2019).lte('year', 2026).order('year'),
-      supabase.from('mv_country_by_year').select('country_code,service_count').eq('route_type', routeType).eq('year', 2025).order('service_count', { ascending: false }).limit(15),
-      supabase.from('mv_port_by_year').select('port_code,service_count').eq('route_type', routeType).eq('year', 2025).order('service_count', { ascending: false }).limit(15),
-    ]).then(([byYearRes, topCtryRes, topPortRes]) => {
-      const rows = byYearRes.data ?? []
-      // Aggregate by year (multiple sub-route rows per year possible)
-      const map = new Map<number, { service_count: number; total_capacity_teu: number }>()
-      for (const r of rows) {
-        const cur = map.get(r.year) ?? { service_count: 0, total_capacity_teu: 0 }
-        cur.service_count += r.service_count ?? 0
-        cur.total_capacity_teu += r.total_capacity_teu ?? 0
-        map.set(r.year, cur)
-      }
-      const agg = Array.from(map.entries()).map(([year, v]) => ({ year, ...v })).sort((a, b) => a.year - b.year)
-      setByYear(agg)
-      const cur2025 = agg.find(r => r.year === 2025)
-      setKpi({ services: cur2025?.service_count ?? 0, capacity: cur2025?.total_capacity_teu ?? 0 })
-      setTopCountries(topCtryRes.data ?? [])
-      setTopPorts(topPortRes.data ?? [])
-    }).catch(e => setError(String(e)))
-      .finally(() => setLoading(false))
-  }, [routeType, subRoute])
+  // Reset the deeper levels whenever level 1 changes
+  useEffect(() => { setRoute2(''); setRoute3('') }, [route1])
+  useEffect(() => { setRoute3('') }, [route2])
+
+  const level3 = Array.from(new Set(
+    (subs.data?.pairs ?? [])
+      .filter(r => !route2 || r.trade_route_2 === route2)
+      .map(r => r.trade_route_3).filter(Boolean)
+  )).sort()
+
+  const q = useQuery(async () => {
+    let sel = supabase.from('mv_trade_route_year')
+      .select('year,trade_route_2,trade_route_3,service_count,service_capacity_teu,annual_capacity_teu,vessels_deployed,avg_speed_kn,avg_ports_per_service')
+      .eq('trade_route_1', route1)
+      .gte('year', MIN_YEAR).lte('year', MAX_YEAR)
+    if (route2) sel = sel.eq('trade_route_2', route2)
+    if (route3) sel = sel.eq('trade_route_3', route3)
+
+    const [series, topCountries, topPorts] = await Promise.all([
+      sel.order('year'),
+      supabase.from('mv_country_year')
+        .select('country_code,service_count')
+        .eq('route_type', route1).eq('year', MAX_YEAR - 1)
+        .order('service_count', { ascending: false }).limit(14),
+      supabase.from('mv_port_year')
+        .select('port_code,port_name,service_count')
+        .eq('route_type', route1).eq('year', MAX_YEAR - 1)
+        .order('service_count', { ascending: false }).limit(14),
+    ])
+
+    const rows = unwrap(series) as {
+      year: number; service_count: number; service_capacity_teu: number
+      annual_capacity_teu: number; vessels_deployed: number
+      avg_speed_kn: number; avg_ports_per_service: number
+    }[]
+
+    // Roll up across the sub-route rows that survived the filters
+    const byYear = Array.from(rows.reduce((m, r) => {
+      const cur = m.get(r.year) ?? { year: r.year, services: 0, capacity: 0, annual: 0, vessels: 0 }
+      cur.services += r.service_count ?? 0
+      cur.capacity += r.service_capacity_teu ?? 0
+      cur.annual   += r.annual_capacity_teu ?? 0
+      cur.vessels  += r.vessels_deployed ?? 0
+      m.set(r.year, cur)
+      return m
+    }, new Map<number, { year: number; services: number; capacity: number; annual: number; vessels: number }>()).values())
+      .sort((a, b) => a.year - b.year)
+
+    const latest = byYear.find(r => r.year === MAX_YEAR - 1)
+    const speedRows = rows.filter(r => r.year === MAX_YEAR - 1 && r.avg_speed_kn)
+    return {
+      byYear, latest,
+      avgSpeed: speedRows.length ? speedRows.reduce((s, r) => s + r.avg_speed_kn, 0) / speedRows.length : null,
+      avgPorts: speedRows.length ? speedRows.reduce((s, r) => s + (r.avg_ports_per_service ?? 0), 0) / speedRows.length : null,
+      topCountries: unwrap(topCountries) as { country_code: string; service_count: number }[],
+      topPorts: unwrap(topPorts) as { port_code: string; port_name: string; service_count: number }[],
+    }
+  }, [route1, route2, route3])
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-4 flex-wrap">
-        <h1 className="text-xl font-bold text-white">Trade Route Overview</h1>
-        <div className="flex gap-2">
-          {ROUTE_TYPES.map(rt => (
-            <button key={rt} onClick={() => setRouteType(rt)}
-              className={`px-3 py-1 text-xs rounded border transition-colors ${routeType === rt ? 'bg-[#00C2CB] border-[#00C2CB] text-black font-semibold' : 'border-[#1E3A5F] text-[#94A3B8] hover:text-white'}`}>
-              {rt}
-            </button>
-          ))}
-        </div>
-        {subRoutes.length > 0 && <Select value={subRoute} onChange={setSubRoute} options={subRoutes} placeholder="All sub-routes" />}
+      <PageHeader
+        title="Trade Route Overview"
+        subtitle={[route1, route2, route3].filter(Boolean).join(' › ')}
+      >
+        <Tabs value={route1} onChange={setRoute1} options={ROUTE_1} />
+      </PageHeader>
+
+      <div className="flex gap-3 flex-wrap">
+        {(subs.data?.level2.length ?? 0) > 1 && (
+          <Select value={route2} onChange={setRoute2} placeholder="All sub-routes"
+                  options={(subs.data?.level2 ?? []).map(v => ({ value: v, label: v }))} />
+        )}
+        {level3.length > 1 && (
+          <Select value={route3} onChange={setRoute3} placeholder="All lanes"
+                  options={level3.map(v => ({ value: v, label: v }))} />
+        )}
       </div>
 
-      {loading ? <Spinner /> : error ? <ErrorMsg msg={error} /> : (
+      {q.loading ? <Spinner /> : q.error ? <ErrorMsg msg={q.error} /> : !q.data ? null : (
         <>
-          <div className="grid grid-cols-4 gap-4">
-            <KPICard label="Active Services (2025)" value={kpi.services} accent />
-            <KPICard label="Total Capacity (TEU, 2025)" value={kpi.capacity ? (kpi.capacity / 1e6).toFixed(1) + 'M' : '—'} />
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+            <KPICard label={`Services (${MAX_YEAR - 1})`} value={q.data.latest?.services ?? 0} accent sub="calling during year" />
+            <KPICard label="Deployed Capacity" value={fmtTeu(q.data.latest?.capacity)} sub="TEU per rotation" />
+            <KPICard label="Annual Capacity" value={fmtTeu(q.data.latest?.annual)} sub="TEU/yr" />
+            <KPICard label="Vessels Deployed" value={fmt(q.data.latest?.vessels)} />
+            <KPICard label="Avg Speed" value={q.data.avgSpeed ? q.data.avgSpeed.toFixed(1) + ' kn' : '—'}
+                     sub="port-arrival basis" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Card title="Active Services Evolution">
-              <ResponsiveContainer width="100%" height={240}>
-                <ComposedChart data={byYear} margin={{ top: 5, right: 40, bottom: 0, left: 0 }}>
-                  <XAxis dataKey="year" tick={{ fill: '#94A3B8', fontSize: 11 }} />
-                  <YAxis yAxisId="left" tick={{ fill: '#94A3B8', fontSize: 11 }} width={40} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fill: '#94A3B8', fontSize: 11 }} width={55} tickFormatter={v => (v / 1e9).toFixed(1) + 'B'} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar yAxisId="left" dataKey="service_count" name="Services" fill="#008B8B" />
-                  <Line yAxisId="right" dataKey="total_capacity_teu" name="Capacity (TEU)" stroke="#FFD700" dot={false} strokeWidth={2} />
+
+          <Card title="Services & Capacity Evolution" subtitle="capacity from VSA proforma allocations">
+            {q.data.byYear.length === 0 ? <Empty /> : (
+              <ResponsiveContainer width="100%" height={280}>
+                <ComposedChart data={q.data.byYear} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                  <XAxis dataKey="year" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={{ stroke: '#1E3A5F' }} tickLine={false} />
+                  <YAxis yAxisId="l" tick={{ fill: '#94A3B8', fontSize: 11 }} width={42} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="r" orientation="right" tick={{ fill: '#94A3B8', fontSize: 11 }} width={46}
+                         axisLine={false} tickLine={false} tickFormatter={fmtTeu} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: '#ffffff08' }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={7} />
+                  <Bar yAxisId="l" dataKey="services" name="Services" fill="#008B8B" radius={[2, 2, 0, 0]} />
+                  <Line yAxisId="r" dataKey="capacity" name="Capacity (TEU)" stroke="#FFD700" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
+            )}
+          </Card>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <Card title="Top Countries" subtitle={`on ${route1} routes, ${MAX_YEAR - 1}`}>
+              <BarList rows={q.data.topCountries.map(c => ({ label: c.country_code, value: c.service_count }))}
+                       color="#4682B4" maxRows={14} />
             </Card>
-            <div className="grid gap-4">
-              <Card title="Top Countries (2025)">
-                <ResponsiveContainer width="100%" height={140}>
-                  <BarChart data={topCountries} layout="vertical" margin={{ top: 0, right: 10, bottom: 0, left: 30 }}>
-                    <XAxis type="number" tick={{ fill: '#94A3B8', fontSize: 10 }} />
-                    <YAxis type="category" dataKey="country_code" tick={{ fill: '#CBD5E1', fontSize: 10 }} width={36} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Bar dataKey="service_count" name="Services" fill="#4682B4" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </Card>
-              <Card title="Top Ports (2025)">
-                <ResponsiveContainer width="100%" height={140}>
-                  <BarChart data={topPorts} layout="vertical" margin={{ top: 0, right: 10, bottom: 0, left: 45 }}>
-                    <XAxis type="number" tick={{ fill: '#94A3B8', fontSize: 10 }} />
-                    <YAxis type="category" dataKey="port_code" tick={{ fill: '#CBD5E1', fontSize: 10 }} width={45} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Bar dataKey="service_count" name="Services" fill="#4169E1" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </Card>
-            </div>
+            <Card title="Top Ports" subtitle={`on ${route1} routes, ${MAX_YEAR - 1}`}>
+              <BarList rows={q.data.topPorts.map(p => ({ label: p.port_name ?? p.port_code, value: p.service_count }))}
+                       color="#4169E1" maxRows={14} />
+            </Card>
           </div>
+
+          <p className="text-[10px] text-[#3E5878] leading-relaxed">
+            Route hierarchy follows the eeSea trade-lane classification: level 1 (East/West,
+            North/South, Intra-Regional, Feeders) › level 2 (E/W Primary vs Secondary) › level 3
+            (individual lanes such as E/W FE_NAM). Distance and speed use{' '}
+            <span className="text-[#5A7196]">PORT_ARRIVAL</span> events, which include chokepoint
+            transits since those are part of the route.
+          </p>
         </>
       )}
     </div>
