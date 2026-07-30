@@ -14,11 +14,19 @@ function timeAgo(iso: string): string {
 }
 
 /**
- * Executive Insight panel — shown on every page. Generation is manual
- * (button click), never automatic on load: each click is a real Tavily +
- * Claude API call, so firing it on every page view would bill per visitor.
- * The last generated insight is cached in Supabase and reused until the user
- * asks for a fresh one.
+ * Market Intelligence panel — shown on every page. Combines the exact KPIs
+ * on screen with recent (30-day) real-world shipping news via Tavily, then
+ * has Claude synthesize a short analyst narrative.
+ *
+ * Two refresh paths feed the same cache:
+ *  - scripts/refresh_insights.py runs weekly via GitHub Actions and pre-warms
+ *    global + the top ports/countries/liners, so those usually show a recent
+ *    insight on first view.
+ *  - Any other entity (or a forced refresh) is generated here on demand via
+ *    the button — never automatically on page load, since each click is a
+ *    real billed Tavily + Anthropic call.
+ * Either way the result lands in the same ai_insights row, so the UI doesn't
+ * need to know which path produced it.
  */
 export default function ExecutiveInsight({
   scope, scopeKey, entityLabel, kpis,
@@ -56,7 +64,7 @@ export default function ExecutiveInsight({
 
   return (
     <Card
-      title="Executive Insight"
+      title="Market Intelligence"
       subtitle={insight ? `Generated ${timeAgo(insight.created_at)} · grounded in current KPIs + recent news` : 'AI-generated, on demand'}
       actions={
         <button
@@ -95,8 +103,8 @@ export default function ExecutiveInsight({
         </div>
       ) : (
         <p className="text-xs" style={{ color: 'var(--dim)' }}>
-          No insight generated yet for this view. Click "Generate insight" for an AI-written
-          briefing that combines these numbers with recent shipping news.
+          No market intelligence generated yet for this view. Click "Generate insight" for an
+          AI-written briefing that combines these numbers with recent shipping news.
         </p>
       )}
     </Card>
