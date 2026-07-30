@@ -9,6 +9,7 @@ import {
   MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
 import WorldMap from '../components/WorldMap'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 export default function CoastalRegion() {
   const { palette } = useTheme()
@@ -80,6 +81,10 @@ export default function CoastalRegion() {
             <KPICard label="Ports" value={q.data.ports.length} sub="with berth calls" />
             <KPICard label="Deployed Capacity" value={fmtTeu(capacity)} sub="TEU across region ports" />
           </div>
+
+          <ExecutiveInsight scope="coastal_region" scopeKey={region} entityLabel={region}
+                             kpis={{ services: q.data.services, countries: q.data.countries,
+                                     ports: q.data.ports.length, capacity_teu: capacity }} />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <Card title="Active Services by Trade Route" subtitle="services calling during each year">

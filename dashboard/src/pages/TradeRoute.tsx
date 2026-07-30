@@ -7,6 +7,7 @@ import {
   KPICard, Card, Spinner, ErrorMsg, Empty, PageHeader, Select, Tabs, BarList,
   ROUTE_COLORS, CustomTooltip, fmtTeu, fmt, MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 const ROUTE_1 = ['East/West', 'North/South', 'Intra-Regional', 'Feeders']
 
@@ -116,6 +117,10 @@ export default function TradeRoute() {
             <KPICard label="Avg Speed" value={q.data.avgSpeed ? q.data.avgSpeed.toFixed(1) + ' kn' : '—'}
                      sub="port-arrival basis" />
           </div>
+
+          <ExecutiveInsight scope="trade_route" scopeKey={route3 || route2 || route1}
+                             entityLabel={[route1, route2, route3].filter(Boolean).join(' › ')}
+                             kpis={{ ...(q.data.latest ?? {}), avgSpeedKn: q.data.avgSpeed, avgPorts: q.data.avgPorts }} />
 
           <Card title="Services & Capacity Evolution" subtitle="capacity from VSA proforma allocations">
             {q.data.byYear.length === 0 ? <Empty /> : (

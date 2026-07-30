@@ -9,6 +9,7 @@ import {
 } from '../components/ui'
 import WorldMap from '../components/WorldMap'
 import { routesForService, routeStatsForService, toMapRoutes, endpointsFromRoutes } from '../lib/routes'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 type Version = {
   service_version_id: number
@@ -192,6 +193,19 @@ export default function Service() {
             <KPICard label="Annual Capacity" value={fmtTeu(s.annual_capacity_teu)}
                      sub={`${fmt(s.annual_rotations, 1)} rotations/yr`} />
           </div>
+
+          <ExecutiveInsight scope="service" scopeKey={master} entityLabel={master}
+                             kpis={{
+                               roundtrip_days: s.service_version_roundtrip_days,
+                               frequency_days: s.service_version_frequency_days,
+                               ports: s.service_version_port_count,
+                               vessels_deployed: s.vessels_deployed,
+                               service_capacity_teu: s.service_capacity_teu,
+                               annual_capacity_teu: s.annual_capacity_teu,
+                               alliance: s.alliance_code,
+                               trade_route: s.trade_route_1,
+                               is_currently_active: hist.data?.isLive,
+                             }} />
 
           {/* ---------- Route map ---------- */}
           <SectionTitle title="Nautical rotation"

@@ -10,6 +10,7 @@ import {
 } from '../components/ui'
 import WorldMap from '../components/WorldMap'
 import { routesForLiner, routeStatsForLiner, toMapRoutes, endpointsFromRoutes } from '../lib/routes'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 export default function Liners() {
   const { palette } = useTheme()
@@ -115,6 +116,9 @@ export default function Liners() {
             <KPICard label="Annual Capacity" value={fmtTeu(k?.annual_capacity_teu)} sub="TEU/yr" />
             <KPICard label="Versions" value={fmt(k?.active_versions)} />
           </div>
+
+          <ExecutiveInsight scope="liner" scopeKey={liner} entityLabel={k?.company_name ?? liner}
+                             kpis={{ ...(k ?? {}), route_legs: stats?.legs, ports_served: stats?.ports }} />
 
           {/* ---------- Network map ---------- */}
           <SectionTitle title="Active network"

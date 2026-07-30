@@ -9,6 +9,7 @@ import {
   MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
 import WorldMap from '../components/WorldMap'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 export default function Country() {
   const { palette } = useTheme()
@@ -82,6 +83,9 @@ export default function Country() {
             <KPICard label="Deployed Capacity" value={fmtTeu(k?.service_capacity_teu)} sub="TEU per rotation" />
             <KPICard label="Annual Capacity" value={fmtTeu(k?.annual_capacity_teu)} sub="TEU/yr" />
           </div>
+
+          <ExecutiveInsight scope="country" scopeKey={country} entityLabel={k?.country_name ?? country}
+                             kpis={k ?? {}} />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <Card title="Active Services by Trade Route" subtitle="services calling during each year">

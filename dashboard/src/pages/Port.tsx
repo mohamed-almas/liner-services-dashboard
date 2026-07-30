@@ -16,6 +16,7 @@ import {
   routesForPort, routesForPortAt, routeStatsForPort, routeStatsForPortAt,
   toMapRoutes, endpointsFromRoutes, type RouteRow, type RouteStats,
 } from '../lib/routes'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 const LOOKBACK = ['3 months', '6 months', '12 months', '24 months', '36 months'] as const
 const LOOKBACK_MONTHS: Record<string, number> = {
@@ -222,6 +223,9 @@ export default function Port() {
             <KPICard label="Partner Countries" value={c?.partner_countries ?? 0}
                      delta={delta(core.data.now?.partner_countries, core.data.prev?.partner_countries)} />
           </div>
+
+          <ExecutiveInsight scope="port" scopeKey={port} entityLabel={k?.port_name ?? port}
+                             kpis={{ ...(k ?? {}), ...(c ?? {}), route_legs: stats?.legs, route_total_nm: stats?.total_nm }} />
 
           {k?.has_berth_calls === false && (
             <div className="text-[11px] rounded px-3 py-2 border"

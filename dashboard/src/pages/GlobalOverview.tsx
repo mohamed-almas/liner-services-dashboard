@@ -9,6 +9,7 @@ import {
   MIN_YEAR, MAX_YEAR,
 } from '../components/ui'
 import WorldMap, { type MapPoint } from '../components/WorldMap'
+import ExecutiveInsight from '../components/ExecutiveInsight'
 
 type Metric = 'Services' | 'Capacity' | 'Liners' | 'Partner ports'
 const METRICS: Metric[] = ['Services', 'Capacity', 'Liners', 'Partner ports']
@@ -139,6 +140,9 @@ export default function GlobalOverview() {
         <KPICard label="Deployed Capacity" value={fmtTeu(d.k?.service_capacity_teu)} sub="TEU per rotation" />
         <KPICard label="Annual Capacity" value={fmtTeu(d.k?.annual_capacity_teu)} sub="TEU/yr" />
       </div>
+
+      <ExecutiveInsight scope="global" scopeKey="global" entityLabel="the global liner shipping market"
+                         kpis={d.k ?? {}} />
 
       <SectionTitle title="Evolution" note="services calling during each year" />
 
