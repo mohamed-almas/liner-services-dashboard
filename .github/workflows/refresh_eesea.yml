@@ -9,7 +9,10 @@ jobs:
   load:
     name: BigQuery → Supabase
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Raw table load alone now takes ~55 min (port_vessels_per_service is
+    # 4.8M rows) before the matview refresh even starts — 60 min was already
+    # too tight and masked the real failure below with a job-timeout kill.
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4

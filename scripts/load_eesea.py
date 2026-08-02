@@ -60,12 +60,12 @@ class SupabaseREST:
             "Prefer": "return=minimal",
         }
 
-    def rpc(self, fn: str, params: dict = None):
+    def rpc(self, fn: str, params: dict = None, timeout: int = 60):
         r = requests.post(
             f"{self.base}/rpc/{fn}",
             json=params or {},
             headers=self.headers,
-            timeout=60,
+            timeout=timeout,
         )
         if not r.ok:
             raise RuntimeError(f"RPC {fn} failed {r.status_code}: {r.text[:500]}")
@@ -141,9 +141,17 @@ def main():
 
     # Always refresh matviews regardless of table load errors so the dashboard
     # reflects the latest successfully-loaded data even on partial failures.
+    #
+    # The refresh_eesea_matviews() function itself sets statement_timeout = 0,
+    # so Postgres never kills it server-side — but the client-side HTTP read
+    # timeout still applies. With 30+ views (several now driven by
+    # multi-million-row tables: port_vessels_per_service, service_proformas,
+    # routes_service_versions) the refresh chain can run well past a minute,
+    # so give it a generous ceiling rather than the default 60s used for
+    # quick calls like truncate.
     try:
         log.info("Refreshing materialized views ...")
-        sb.rpc("refresh_eesea_matviews")
+        sb.rpc("refresh_eesea_matviews", timeout=1800)
         log.info("Matviews refreshed")
     except Exception as e:
         log.error("Matview refresh failed: %s", e)
