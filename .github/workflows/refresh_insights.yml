@@ -1,8 +1,9 @@
 name: Refresh Market Intelligence
 
 on:
-  schedule:
-    - cron: "30 3 * * 0"   # every Sunday at 03:30 UTC, after the 02:00 data refresh
+  # schedule disabled — manual dispatch only. Re-enable by uncommenting:
+  # schedule:
+  #   - cron: "30 3 * * 0"   # every Sunday at 03:30 UTC, after the 02:00 data refresh
   workflow_dispatch:         # manual trigger from GitHub UI
 
 jobs:
