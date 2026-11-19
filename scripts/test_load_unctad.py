@@ -117,6 +117,30 @@ def test_env_is_lazy():
         raise AssertionError("missing env var must raise")
 
 
+def test_period_batches():
+    # Bilateral: 191^2 = 36,481 cells per quarter, so each quarter is its own
+    # request. Four quarters in one call is 145,924 and UNCTAD returns HTTP 400.
+    codes = [f"{i:03d}" for i in range(191)]
+    quarters = ["2026Q01", "2026Q02", "2026Q03", "2026Q04"]
+    b = m.period_batches(m.DATASETS["lsbci"], quarters, codes)
+    assert [len(x) for x in b] == [1, 1, 1, 1], b
+    assert [p for x in b for p in x] == quarters, "no period may be dropped"
+
+    # Single-axis datasets fit in one request.
+    assert len(m.period_batches(m.DATASETS["lsci"], ["2026M09"] * 3, codes)) == 1
+    ports = [f"P{i:04d}" for i in range(1354)]
+    b = m.period_batches(m.DATASETS["plsci"], ["2026Q03", "2026Q04"], ports)
+    assert len(b) == 1, b
+
+    # Every period survives batching at a larger span.
+    many = m.quarter_periods()
+    out = [p for x in m.period_batches(m.DATASETS["lsbci"], many, codes) for p in x]
+    assert out == many
+
+    # No code filter -> single batch.
+    assert m.period_batches(m.DATASETS["lsbci"], quarters, None) == [quarters]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

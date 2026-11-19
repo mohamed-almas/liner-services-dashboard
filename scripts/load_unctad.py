@@ -196,10 +196,33 @@ def sb_codes(dataset):
     if r.status_code >= 400:
         raise RuntimeError(f"unctad_codes({dataset}) failed "
                            f"{r.status_code}: {r.text[:300]}")
-    codes = [row["code"] if isinstance(row, dict) else row for row in r.json()]
+    payload = r.json()
+    # The function returns text[]; PostgREST hands it back as a JSON array.
+    if isinstance(payload, dict):
+        payload = next(iter(payload.values()), [])
+    codes = [c for c in payload if c]
     if not codes:
         raise RuntimeError(f"unctad_codes({dataset}) returned nothing")
     return sorted(codes)
+
+
+# UNCTAD caps a single response at 62,500 cells and rejects anything larger with
+# HTTP 400 ("The request exceed the maximal size"). Bilateral LSBCI is
+# 191 x 191 = 36,481 cells per quarter, so 4 quarters in one call is 145,924 and
+# fails. Split the period list so each request stays under the cap.
+MAX_CELLS = 60000
+
+
+def period_batches(cfg, periods, codes):
+    if not codes:
+        return [periods]
+    per_period = len(codes) ** (2 if cfg.get("extra_code_dim") else 1)
+    if per_period > MAX_CELLS:
+        raise RuntimeError(
+            f"a single period needs {per_period} cells, over the {MAX_CELLS} cap; "
+            "the code list would have to be chunked too")
+    size = max(1, MAX_CELLS // per_period)
+    return [periods[i:i + size] for i in range(0, len(periods), size)]
 
 
 def sb_max(table, column):
@@ -375,15 +398,25 @@ def run(name, full, all_codes, do_discover):
     log(f"  {len(periods)} period(s) {periods[0]}..{periods[-1]}"
         f"{'' if codes is None else f', {len(codes)} codes'}")
 
-    form = build_form(cfg, periods, codes)
-    blob = fetch_async(cfg, form) if cfg["is_async"] else fetch_sync(cfg, form)
-    rows = parse_csv(blob, cfg)
-    log(f"  parsed {len(rows)} rows")
-    if not rows:
+    batches = period_batches(cfg, periods, codes)
+    if len(batches) > 1:
+        log(f"  splitting into {len(batches)} request(s) to stay under the size cap")
+
+    total = 0
+    for batch in batches:
+        form = build_form(cfg, batch, codes)
+        blob = fetch_async(cfg, form) if cfg["is_async"] else fetch_sync(cfg, form)
+        rows = parse_csv(blob, cfg)
+        log(f"  {batch[0]}..{batch[-1]}: parsed {len(rows)} rows")
+        if not rows:
+            continue
+        sb_upsert(cfg["table"], rows, cfg["on_conflict"])
+        total += len(rows)
+
+    if not total:
         log("  WARNING: no rows returned, nothing written")
         return
-
-    sb_upsert(cfg["table"], rows, cfg["on_conflict"])
+    log(f"  {total} rows upserted")
 
     if name == "lsci":
         log("  filling derived growth columns")
