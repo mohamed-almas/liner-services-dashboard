@@ -2,11 +2,17 @@ name: Refresh UNCTAD indices
 
 on:
   schedule:
-    # UNCTAD republishes LSCI monthly and PLSCI/LSBCI quarterly, on no fixed
-    # weekday. The loader is incremental (only periods missing from the table,
-    # plus the latest stored one in case it was revised), so a weekly poll is
-    # cheap and caps how long a new release goes unnoticed at 7 days.
-    - cron: "0 5 * * 1"   # Monday 05:00 UTC
+    # Matched to UNCTAD's own release cadence: LSCI_M monthly, PLSCI and LSBCI
+    # quarterly. Releases land late in the month (LSCI_M and PLSCI 28 Sep 2026,
+    # LSBCI 26 Jun 2026), so each run sits just after a release window.
+    #
+    # The 15th runs are a safety net, not a second poll: a release that slipped
+    # past the 1st would otherwise go unnoticed for a month (LSCI) or a whole
+    # quarter (PLSCI/LSBCI). A run with nothing new fetches 0 rows in seconds.
+    - cron: "0 5 1 * *"           # LSCI: 1st of each month, 05:00 UTC
+    - cron: "0 5 15 * *"          # LSCI: mid-month catch-up
+    - cron: "30 5 1 1,4,7,10 *"   # PLSCI + LSBCI: 1st of Jan/Apr/Jul/Oct
+    - cron: "30 5 15 1,4,7,10 *"  # PLSCI + LSBCI: mid-month catch-up
   workflow_dispatch:
     inputs:
       dataset:
@@ -67,7 +73,11 @@ jobs:
           UNCTAD_API_KEY: ${{ secrets.UNCTAD_API_KEY }}
           SUPABASE_URL: https://jeuqpnhajmatekbzlfne.supabase.co/rest/v1
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          DATASET: ${{ github.event.inputs.dataset || 'all' }}
+          # A scheduled run loads only what that cadence publishes; a manual run
+          # uses the chosen input. The loader accepts several dataset names.
+          DATASET: >-
+            ${{ github.event_name != 'schedule' && (github.event.inputs.dataset || 'all')
+             || (startsWith(github.event.schedule, '30 5') && 'plsci lsbci' || 'lsci') }}
           FULL: ${{ github.event.inputs.full }}
           ALL_CODES: ${{ github.event.inputs.all_codes }}
           DISCOVER: ${{ github.event.inputs.discover }}
