@@ -1,0 +1,82 @@
+name: Refresh UNCTAD indices
+
+on:
+  schedule:
+    # UNCTAD republishes LSCI monthly and PLSCI/LSBCI quarterly, on no fixed
+    # weekday. The loader is incremental (only periods missing from the table,
+    # plus the latest stored one in case it was revised), so a weekly poll is
+    # cheap and caps how long a new release goes unnoticed at 7 days.
+    - cron: "0 5 * * 1"   # Monday 05:00 UTC
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: "Which dataset to refresh."
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - lsci
+          - plsci
+          - lsbci
+      full:
+        description: "Refetch every period from 2006 instead of only new ones. LSBCI is ~690k rows -- expect a long run."
+        required: false
+        default: false
+        type: boolean
+      all_codes:
+        description: "Drop the economy/port filter so newly added countries or ports come through. May also pull UNCTAD aggregate rows."
+        required: false
+        default: false
+        type: boolean
+      discover:
+        description: "Dump API measure/dimension metadata instead of loading. Use to find the growth-rate measure codes."
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: refresh-unctad
+  cancel-in-progress: false
+
+jobs:
+  load:
+    name: UNCTADstat API → Supabase
+    runs-on: ubuntu-latest
+    # LSBCI is bilateral (~190 x 190 per quarter); a --full reload is the slow case.
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Offline checks
+        run: python scripts/test_load_unctad.py
+
+      - name: Load UNCTAD indices
+        env:
+          UNCTAD_CLIENT_ID: ${{ secrets.UNCTAD_CLIENT_ID }}
+          UNCTAD_API_KEY: ${{ secrets.UNCTAD_API_KEY }}
+          SUPABASE_URL: https://jeuqpnhajmatekbzlfne.supabase.co/rest/v1
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATASET: ${{ github.event.inputs.dataset || 'all' }}
+          FULL: ${{ github.event.inputs.full }}
+          ALL_CODES: ${{ github.event.inputs.all_codes }}
+          DISCOVER: ${{ github.event.inputs.discover }}
+        run: |
+          # Plain `[ test ] && assign` would abort the step under `bash -e`
+          # whenever the test is false, so use explicit ifs.
+          args="$DATASET"
+          if [ "$FULL" = "true" ]; then args="$args --full"; fi
+          if [ "$ALL_CODES" = "true" ]; then args="$args --all-codes"; fi
+          if [ "$DISCOVER" = "true" ]; then args="$args --discover"; fi
+          echo "running: load_unctad.py $args"
+          python scripts/load_unctad.py $args
