@@ -125,6 +125,8 @@ DATASETS = {
                  ("Economy", "economy_code", "economy_label")],
         "code_filter_dim": "Economy",
         "code_filter_col": "economy_code",
+        # Floor for the code universe: under-fetching here is silent data loss.
+        "min_codes": 150,
         "on_conflict": "month,economy_code",
         "order": "Economy/Order asc ,Month/Order asc",
     },
@@ -140,6 +142,8 @@ DATASETS = {
                  ("Port", "port_code", "port_label")],
         "code_filter_dim": "Port",
         "code_filter_col": "port_code",
+        # Floor for the code universe: under-fetching here is silent data loss.
+        "min_codes": 900,
         "on_conflict": "quarter,port_code",
         "order": "Port/Order asc ,Quarter/Order asc",
     },
@@ -156,6 +160,8 @@ DATASETS = {
                  ("Partner", "partner_code", "partner_label")],
         "code_filter_dim": "Economy",
         "code_filter_col": "economy_code",
+        # Floor for the code universe: under-fetching here is silent data loss.
+        "min_codes": 150,
         # Bilateral: the partner axis takes the same economy universe.
         "extra_code_dim": "Partner",
         "on_conflict": "quarter,economy_code,partner_code",
@@ -177,26 +183,23 @@ def sb_headers(extra=None):
     return h
 
 
-def sb_distinct(table, column):
-    """Every distinct non-null value of a column, paged."""
-    seen, offset, page = set(), 0, 10000
-    while True:
-        r = HTTP.get(
-            f"{env('SUPABASE_URL')}/{table}",
-            headers=sb_headers({"Range-Unit": "items",
-                                "Range": f"{offset}-{offset + page - 1}"}),
-            params={"select": column, column: "not.is.null"},
-            timeout=120,
-        )
-        r.raise_for_status()
-        rows = r.json()
-        if not rows:
-            break
-        seen.update(row[column] for row in rows)
-        if len(rows) < page:
-            break
-        offset += page
-    return sorted(seen)
+def sb_codes(dataset):
+    """The economy/port universe, DISTINCTed in Postgres.
+
+    Do not page rows through PostgREST for this: PostgREST caps rows per
+    response, so on a large table you get only the codes that happen to appear
+    in the first page and the filter silently under-fetches. That produced 7
+    economies out of 191 for unctad_lsbci.
+    """
+    r = HTTP.post(f"{env('SUPABASE_URL')}/rpc/unctad_codes",
+                  headers=sb_headers(), json={"dataset": dataset}, timeout=120)
+    if r.status_code >= 400:
+        raise RuntimeError(f"unctad_codes({dataset}) failed "
+                           f"{r.status_code}: {r.text[:300]}")
+    codes = [row["code"] if isinstance(row, dict) else row for row in r.json()]
+    if not codes:
+        raise RuntimeError(f"unctad_codes({dataset}) returned nothing")
+    return sorted(codes)
 
 
 def sb_max(table, column):
@@ -364,7 +367,11 @@ def run(name, full, all_codes, do_discover):
         log("  nothing to fetch")
         return
 
-    codes = None if all_codes else sb_distinct(cfg["table"], cfg["code_filter_col"])
+    codes = None if all_codes else sb_codes(name)
+    if codes is not None and len(codes) < cfg["min_codes"]:
+        raise RuntimeError(
+            f"only {len(codes)} codes for {name}, expected >= {cfg['min_codes']}; "
+            "refusing to fetch a partial universe")
     log(f"  {len(periods)} period(s) {periods[0]}..{periods[-1]}"
         f"{'' if codes is None else f', {len(codes)} codes'}")
 
