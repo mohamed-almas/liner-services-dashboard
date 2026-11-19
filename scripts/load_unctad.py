@@ -69,6 +69,18 @@ def log(msg):
     print(f"[{dt.datetime.now(dt.timezone.utc):%H:%M:%S}] {msg}", flush=True)
 
 
+# UNCTADstat sits behind Cloudflare, which 403s the default python-requests
+# user agent with an "Attention Required!" interstitial. UNCTAD's own R sample
+# goes through libcurl and is let through, so send a plain client identifier.
+# Deliberately generic: no account, repo or personal identifiers.
+HTTP = requests.Session()
+HTTP.headers.update({
+    "User-Agent": "unctad-index-loader/1.0",
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate",
+})
+
+
 # --------------------------------------------------------------- period lists
 def lsci_periods():
     today = dt.date.today()
@@ -169,7 +181,7 @@ def sb_distinct(table, column):
     """Every distinct non-null value of a column, paged."""
     seen, offset, page = set(), 0, 10000
     while True:
-        r = requests.get(
+        r = HTTP.get(
             f"{env('SUPABASE_URL')}/{table}",
             headers=sb_headers({"Range-Unit": "items",
                                 "Range": f"{offset}-{offset + page - 1}"}),
@@ -188,7 +200,7 @@ def sb_distinct(table, column):
 
 
 def sb_max(table, column):
-    r = requests.get(
+    r = HTTP.get(
         f"{env('SUPABASE_URL')}/{table}",
         headers=sb_headers(),
         params={"select": column, "order": f"{column}.desc", "limit": 1},
@@ -202,7 +214,7 @@ def sb_max(table, column):
 def sb_upsert(table, rows, on_conflict):
     for i in range(0, len(rows), BATCH):
         chunk = rows[i:i + BATCH]
-        r = requests.post(
+        r = HTTP.post(
             f"{env('SUPABASE_URL')}/{table}",
             headers=sb_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
             params={"on_conflict": on_conflict},
@@ -215,7 +227,7 @@ def sb_upsert(table, rows, on_conflict):
 
 
 def sb_rpc(fn):
-    r = requests.post(f"{env('SUPABASE_URL')}/rpc/{fn}", headers=sb_headers(),
+    r = HTTP.post(f"{env('SUPABASE_URL')}/rpc/{fn}", headers=sb_headers(),
                       json={}, timeout=600)
     if r.status_code >= 400:
         raise RuntimeError(f"rpc {fn} failed {r.status_code}: {r.text[:300]}")
@@ -257,7 +269,7 @@ def build_form(cfg, periods, codes):
 
 def fetch_sync(cfg, form):
     url = f"{API_ROOT}/{cfg['report']}/cur/Facts?culture=en"
-    r = requests.post(url, headers=api_headers(), data=form, timeout=900)
+    r = HTTP.post(url, headers=api_headers(), data=form, timeout=900)
     if r.status_code != 200:
         raise RuntimeError(f"{cfg['report']} returned {r.status_code}: {r.text[:400]}")
     return r.content
@@ -266,7 +278,7 @@ def fetch_sync(cfg, form):
 def fetch_async(cfg, form):
     """UNCTAD prepares the file: 202 accepted, then poll until 302 + Location."""
     url = f"{API_ROOT}/async/{cfg['report']}/cur/Facts?culture=en"
-    r = requests.post(url, headers=api_headers(), data=form,
+    r = HTTP.post(url, headers=api_headers(), data=form,
                       timeout=300, allow_redirects=False)
     if r.status_code != 202:
         raise RuntimeError(f"async request rejected {r.status_code}: {r.text[:400]}")
@@ -277,7 +289,7 @@ def fetch_async(cfg, form):
         retry_after = r.headers.get("retry-after")
         if r.status_code == 302 and location:
             log("    file ready, downloading")
-            d = requests.get(location, timeout=900)
+            d = HTTP.get(location, timeout=900)
             d.raise_for_status()
             return d.content
         if not (location and retry_after):
@@ -285,7 +297,7 @@ def fetch_async(cfg, form):
         wait = min(float(retry_after), 60)
         log(f"    not ready, waiting {wait:g}s")
         time.sleep(wait)
-        r = requests.get(location, timeout=300, allow_redirects=False)
+        r = HTTP.get(location, timeout=300, allow_redirects=False)
     raise RuntimeError("async download timed out after 1h")
 
 
@@ -325,7 +337,7 @@ def discover(cfg):
     for path in ("$metadata", "Measures?culture=en", "Dimensions?culture=en"):
         url = f"{API_ROOT}/{cfg['report']}/cur/{path}"
         try:
-            r = requests.get(url, headers=api_headers(), timeout=120)
+            r = HTTP.get(url, headers=api_headers(), timeout=120)
             log(f"  {path} -> {r.status_code}")
             if r.ok:
                 print(r.text[:4000])
